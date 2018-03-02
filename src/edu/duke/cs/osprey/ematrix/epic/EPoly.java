@@ -59,6 +59,7 @@ import cern.colt.matrix.DoubleMatrix1D;
 import cern.colt.matrix.DoubleMatrix2D;
 import cern.jet.math.Functions;
 import edu.duke.cs.osprey.dof.DegreeOfFreedom;
+import edu.duke.cs.osprey.plug.RCTuplePolytope;
 import java.io.FileInputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -92,13 +93,14 @@ public class EPoly implements Serializable {
     
     
     //Sparse VDW terms
-    SAPE sapeTerm = null;
-    double baseSAPE = 0;//value of SAPE terms at center (SAPE will be evaluated relative to this)
+    public SAPE sapeTerm = null;
+    public double baseSAPE = 0;//value of SAPE terms at center (SAPE will be evaluated relative to this)
 
-    
+    RCTuplePolytope tope = null;//If not null, the EPoly is fit to be good within this polytope
+    //which indicates the non-clashing region (and possibly other restrictions we desire)
 
     public EPoly(int numDOFs, ArrayList<DegreeOfFreedom> DOFs, DoubleMatrix1D DOFmax, DoubleMatrix1D DOFmin, 
-            DoubleMatrix1D center, double minE, double[] coeffs, int order ) {
+            DoubleMatrix1D center, double minE, double[] coeffs, int order, RCTuplePolytope tope ) {
         
         this.numDOFs = numDOFs;
         this.DOFs = DOFs;
@@ -108,6 +110,7 @@ public class EPoly implements Serializable {
         this.minE = minE;
         this.coeffs = coeffs;
         this.order = order;
+        this.tope = tope;
     }
 
     
@@ -117,8 +120,7 @@ public class EPoly implements Serializable {
         //Faster if we can use a shared molecule (this could be possible if this EPoly
         //is part of a MolecEObjFunction)
         
-        DoubleMatrix1D z = toRelCoords(x);
-        double serVal = evalSeries(z);
+        double serVal = evalPolynomial(x);
         
         if(includeMinE)
             serVal += minE;
@@ -134,6 +136,9 @@ public class EPoly implements Serializable {
             return serVal;
     }
     
+    public double evalPolynomial(DoubleMatrix1D x){
+        return evalSeries(toRelCoords(x));
+    }
     
     
     double evalSeries(DoubleMatrix1D z){
@@ -188,50 +193,41 @@ public class EPoly implements Serializable {
         minE += baseSVE;
     }*/
     
-    
-    
-    public DoubleMatrix1D gradient(DoubleMatrix1D x/*, boolean useSharedMolec*/) {
-        //evaluate this EPoly gradient as a function of internal coordinates x
-         
+    public DoubleMatrix1D polynomialGradient(DoubleMatrix1D x){
         DoubleMatrix1D z = toRelCoords(x);
         
         if(this instanceof EPolyPC)
             throw new RuntimeException("ERROR: gradient for EPolyPC not currently supported");
         
-        DoubleMatrix1D grad = seriesGradient(z);
-                 
+        return SeriesFitter.evalSeriesGradient(coeffs, z, numDOFs, false, order, order, null);
+    }
+    
+    public DoubleMatrix1D gradient(DoubleMatrix1D x/*, boolean useSharedMolec*/) {
+        //evaluate this EPoly gradient as a function of internal coordinates x  
         if(sapeTerm!=null)
             throw new RuntimeException("ERROR: SVE gradient not currently supported");
         else 
-            return grad;
+            return polynomialGradient(x);
     }
     
     
-    public DoubleMatrix2D hessian(DoubleMatrix1D x) {
-         
+    
+    public DoubleMatrix2D polynomialHessian(DoubleMatrix1D x){
         DoubleMatrix1D z = toRelCoords(x);
         
         if(this instanceof EPolyPC)
             throw new RuntimeException("ERROR: Hessian for EPolyPC not currently supported");
         
-        DoubleMatrix2D hess = seriesHessian(z);
-                 
+        return SeriesFitter.evalSeriesHessian(coeffs, z, numDOFs, false, order, order, null);
+    }
+    
+    public DoubleMatrix2D hessian(DoubleMatrix1D x) {
         if(sapeTerm!=null)
             throw new RuntimeException("ERROR: SVE Hessian not currently supported");
         else 
-            return hess;
+            return polynomialHessian(x);
     }
     
-    
-    DoubleMatrix1D seriesGradient(DoubleMatrix1D z){
-        //gradient with respect to DOF values
-        return SeriesFitter.evalSeriesGradient(coeffs, z, numDOFs, false, order, order, null);
-    }
-    
-    DoubleMatrix2D seriesHessian(DoubleMatrix1D z){
-        //Hessian with respect to DOF values
-        return SeriesFitter.evalSeriesHessian(coeffs, z, numDOFs, false, order, order, null);
-    }
     
     
     
@@ -278,6 +274,27 @@ public class EPoly implements Serializable {
         if(sapeTerm!=null)
             sapeTerm.mofStandalone = null;
     }
+
+    public double[] getCoeffs() {
+        return coeffs;
+    }
+
+    public int getOrder() {
+        return order;
+    }
+
+    public ArrayList<DegreeOfFreedom> getDOFs() {
+        return DOFs;
+    }
+
+    public DoubleMatrix1D getCenter() {
+        return center;
+    }
+    
+    
+    
+    
+    
 
     
     

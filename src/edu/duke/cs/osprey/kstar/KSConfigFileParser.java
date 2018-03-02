@@ -264,7 +264,7 @@ public class KSConfigFileParser extends ConfigFileParser implements Serializable
 				new EPICSettings(params),
 				getParams().getBool("UseTupExp", false),
 				new LUTESettings(params),
-				dset, moveableStrands, freeBBZones,
+				dset, moveableStrands, setupCATS(),
 				getParams().getBool("useEllipses", false),
 				getParams().getBool("useERef", false),
 				getParams().getBool("AddResEntropy", false),

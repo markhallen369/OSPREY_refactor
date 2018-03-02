@@ -136,4 +136,8 @@ public class ProlinePucker extends DegreeOfFreedom {
     public DOFBlock getBlock(){
         return null;
     }
+    
+    public String getName() {
+        return "PROPUCKER"+res.getPDBResNumber();
+    }
 }

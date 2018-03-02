@@ -15,6 +15,7 @@ import edu.duke.cs.osprey.astar.conf.scoring.AStarScorer;
 import edu.duke.cs.osprey.astar.conf.scoring.MPLPPairwiseHScorer;
 import edu.duke.cs.osprey.astar.conf.scoring.PairwiseGScorer;
 import edu.duke.cs.osprey.astar.conf.scoring.mplp.NodeUpdater;
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import edu.duke.cs.osprey.confspace.ConfSearch;
 import edu.duke.cs.osprey.confspace.SearchProblem;
 import edu.duke.cs.osprey.control.ConfigFileParser;
@@ -77,7 +78,7 @@ public class ConfTreeProfiling {
 			"energyMatrixProfiling",
 			"2KDC.P.forOsprey.pdb", 
 			flexRes, allowedAAs, addWt, doMinimize, useEpic, new EPICSettings(), useTupleExpansion, new LUTESettings(),
-			new DEEPerSettings(), moveableStrands, freeBBZones, useEllipses, useERef, addResEntropy, addWtRots, null, 
+			new DEEPerSettings(), moveableStrands, new CATSSettings(), useEllipses, useERef, addResEntropy, addWtRots, null, 
                         false, new ArrayList<>()
 		);
 		

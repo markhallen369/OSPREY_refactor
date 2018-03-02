@@ -10,7 +10,6 @@ import edu.duke.cs.osprey.tools.StringParsing;
 import java.io.*;
 import java.util.*;
 
-import org.apache.commons.lang.ArrayUtils;
 
 /**
  * This class implements a rotamer library reader. It reads from an input file that contains rotamer information

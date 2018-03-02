@@ -140,7 +140,7 @@ public class CCDMinimizer implements Minimizer {
     double minTime;//time for most recent minimization (ms)
     
     
-    private static final boolean useInitFixableDOFs = false;
+    public boolean useInitFixableDOFs = true;
     //using sidechain-minimized conf to initialize all-DOF minimization in CATS
     
     
@@ -182,8 +182,8 @@ public class CCDMinimizer implements Minimizer {
         //(since the minimizer might be used for many rotameric states, etc.,
         //this can't be done in the constructor)
         DoubleMatrix1D constr[] = objFcn.getConstraints();
-        DOFmin = constr[0];
-        DOFmax = constr[1];
+        DOFmin = constr[0].copy();
+        DOFmax = constr[1].copy();
         
         if(!compInitVals())//Initialize x
             return null;//No initial values found (this is currently only for IBEX)
@@ -237,8 +237,10 @@ public class CCDMinimizer implements Minimizer {
                 if(useRandMinCheck)
                     E = doRandMinCheck(E);
 
-                if( oldE - E < EConvTol )//if using RandMinCheck, make sure it is passed
+                if( oldE - E < EConvTol ){//if using RandMinCheck, make sure it is passed
+                    //System.out.println("CCD num iter: "+iter);//DEBUG!!!
                     break;
+                }
             }
 
 
@@ -414,7 +416,8 @@ public class CCDMinimizer implements Minimizer {
                 rescaleValues();
         }
         
-        
+        //DEBUG!!!
+        //System.out.println("CCD maxed out at iter num "+numIter);
 
         minTime = System.currentTimeMillis() - minStartTime;
     }
@@ -632,10 +635,8 @@ public class CCDMinimizer implements Minimizer {
                 if(isOutOfRange(x.get(dof),dof))
                     return false;
             }
-            return true;
         }
-
-        if(useCorners)
+        else if(useCorners)
             compInitValsCorners();
         else
             compInitValsMiddle();

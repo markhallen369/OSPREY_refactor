@@ -1,0 +1,167 @@
+Splitting into funny voxels
+STEP COMPLETED.  classes pruned: 2455
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 10 4 13248 8075 3690 3708 15648 622 25740 
+STEP COMPLETED.  classes pruned: 2960
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 7 2 12672 8075 3690 3708 15648 622 18929 
+STEP COMPLETED.  classes pruned: 8794
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 23 5 35 5 2 10519 7334 3627 3526 15357 622 10655 
+STEP COMPLETED.  classes pruned: 17401
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 3 33 5 1 7258 7334 3533 3487 13725 622 7080 
+STEP COMPLETED.  classes pruned: 17401
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 3 33 5 1 7258 7334 3533 3487 13725 622 7080 
+STEP COMPLETED.  classes pruned: 17401
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 3 33 5 1 7258 7334 3533 3487 13725 622 7080 
+STEP COMPLETED.  classes pruned: 17401
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 3 33 5 1 7258 7334 3533 3487 13725 622 7080 
+STEP COMPLETED.  classes pruned: 24009
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 3 33 5 1 7258 7334 3533 3487 7117 622 7080 
+
+
+
+
+
+Number of RCs by pos: 3 3 9 28 6 35 10 4 26244 13851 6561 6561 34992 1458 47385 
+STEP COMPLETED.  classes pruned: 2464
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 10 4 13284 8075 3690 3708 15648 622 25090 
+STEP COMPLETED.  classes pruned: 2912
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 7 2 13036 8075 3690 3708 15648 622 18700 
+STEP COMPLETED.  classes pruned: 6246
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 23 6 35 5 2 11951 8068 3676 3686 15621 622 11868 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 1775
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 2088
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 2282
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 2396
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 5345
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 5512
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 7011
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+
+
+
+
+
+w/ steric 1  body, flexrescontact, 2-body lp to check feat for bbclasses, then steric 2-body:
+
+Splitting into funny voxels
+Number of RCs by pos: 3 3 9 28 6 35 10 4 26244 13851 6561 6561 34992 1458 47385 
+STEP COMPLETED.  classes pruned: 2464
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 10 4 13284 8075 3690 3708 15648 622 25090 
+Pairs remaining: 1893176716
+STEP COMPLETED.  classes pruned: 2912
+Pairs pruned: 0
+RCs remaining by pos: 3 3 9 28 6 35 7 2 13036 8075 3690 3708 15648 622 18700 
+Pairs remaining: 1591975957
+STEP COMPLETED.  classes pruned: 6246
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 23 6 35 5 2 11951 8068 3676 3686 15621 622 11868 
+Pairs remaining: 1233987396
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+Pairs remaining: 874307857
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+Pairs remaining: 874307857
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+Pairs remaining: 874307857
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+Pairs remaining: 874307857
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 0
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+Pairs remaining: 874307857
+STEP COMPLETED.  classes pruned: 15151
+Pairs pruned: 2270
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 622 8047 
+STEP COMPLETED.  classes pruned: 15157
+Pairs pruned: 2270
+RCs remaining by pos: 3 3 3 22 5 33 5 1 8377 8068 3586 3661 14231 616 8047 
+STEP COMPLETED.  classes pruned: 15414
+Pairs pruned: 2271
+RCs remaining by pos: 3 3 3 22 5 26 5 1 8157 8068 3586 3661 14231 616 8017 
+STEP COMPLETED.  classes pruned: 15660
+Pairs pruned: 2303
+RCs remaining by pos: 3 3 3 22 5 26 5 1 7930 8049 3586 3661 14231 616 8017 
+STEP COMPLETED.  classes pruned: 16105
+Pairs pruned: 2396
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7659 8049 3548 3661 14113 616 8000 
+STEP COMPLETED.  classes pruned: 16757
+Pairs pruned: 4634
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7651 8049 3505 3661 13994 616 7518 
+STEP COMPLETED.  classes pruned: 17586
+Pairs pruned: 4785
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7651 8049 3505 3661 13994 616 6689 
+STEP COMPLETED.  classes pruned: 17586
+Pairs pruned: 6297
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7651 8049 3505 3661 13994 616 6689 
+STEP COMPLETED.  classes pruned: 17684
+Pairs pruned: 7983
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7641 8049 3505 3661 13994 616 6601 
+STEP COMPLETED.  classes pruned: 21493
+Pairs pruned: 18094
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7524 8038 3132 3606 12263 616 5079 
+STEP COMPLETED.  classes pruned: 21778
+Pairs pruned: 19763
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7523 8038 3132 3594 12233 616 4837 
+STEP COMPLETED.  classes pruned: 21812
+Pairs pruned: 24915
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7523 8038 3132 3560 12233 616 4837 
+STEP COMPLETED.  classes pruned: 22121
+Pairs pruned: 29753
+RCs remaining by pos: 3 3 3 22 5 26 4 1 7367 8027 3040 3557 12233 616 4790 
+STEP COMPLETED.  classes pruned: 26103
+Pairs pruned: 39167
+RCs remaining by pos: 3 3 3 22 5 26 4 1 6123 8027 2893 3518 10213 616 4258 
+STEP COMPLETED.  classes pruned: 26233
+Pairs pruned: 41822
+RCs remaining by pos: 3 3 3 22 5 26 4 1 6102 8027 2893 3481 10183 616 4216 
+STEP COMPLETED.  classes pruned: 26421
+Pairs pruned: 47514
+RCs remaining by pos: 3 3 3 22 5 26 4 1 5985 8027 2893 3443 10169 616 4197 
+STEP COMPLETED.  classes pruned: 27068
+Pairs pruned: 53534
+RCs remaining by pos: 3 3 3 22 5 26 4 1 5562 8027 2760 3413 10165 616 4140 
+Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+	at java.util.ArrayList.<init>(ArrayList.java:152)
+	at edu.duke.cs.osprey.confspace.TupleMatrixGeneric.allocate(TupleMatrixGeneric.java:33)
+	at edu.duke.cs.osprey.confspace.AbstractTupleMatrix.<init>(AbstractTupleMatrix.java:78)
+	at edu.duke.cs.osprey.confspace.AbstractTupleMatrix.<init>(AbstractTupleMatrix.java:42)
+	at edu.duke.cs.osprey.confspace.TupleMatrixGeneric.<init>(TupleMatrixGeneric.java:20)
+	at edu.duke.cs.osprey.plug.PolytopeMatrix.<init>(PolytopeMatrix.java:44)
+	at edu.duke.cs.osprey.control.PureGeomDFSer.doSearch(PureGeomDFSer.java:47)
+	at edu.duke.cs.osprey.control.Main$10.run(Main.java:169)
+	at edu.duke.cs.osprey.control.Main.main(Main.java:65)
+Java Result: 1

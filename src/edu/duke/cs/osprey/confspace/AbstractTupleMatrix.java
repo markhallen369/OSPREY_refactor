@@ -118,6 +118,10 @@ public abstract class AbstractTupleMatrix<T> implements TupleMatrix<T>, Serializ
     	return numConfAtPos[pos];
     }
     
+    public int[] getNumConfAtPos() {//get em all
+    	return numConfAtPos;
+    }
+    
     protected int getOneBodyIndex(int res, int conf) {
     	return oneBodyOffsets[res] + conf;
     }
@@ -205,6 +209,28 @@ public abstract class AbstractTupleMatrix<T> implements TupleMatrix<T>, Serializ
             setPairwise( tup.pos.get(0), tup.RCs.get(0), tup.pos.get(1), tup.RCs.get(1), val );
         else if(tupSize>2){//higher-order
             setHigherOrder(tup,val);
+        }
+        else
+            throw new UnsupportedOperationException( "ERROR: Not supporting tuple size " + tupSize );
+    }
+    
+    public T getTupleValue(RCTuple tup){
+        int tupSize = tup.pos.size();
+        
+        if(tupSize==1)//just a one-body quantity
+            return getOneBody( tup.pos.get(0), tup.RCs.get(0));
+        else if(tupSize==2)//two-body
+            return getPairwise( tup.pos.get(0), tup.RCs.get(0), tup.pos.get(1), tup.RCs.get(1) );
+        else if(tupSize==3){
+            HigherTupleFinder<T> htf = getHigherOrderTerms( tup.pos.get(0), tup.RCs.get(0), tup.pos.get(1), tup.RCs.get(1) );
+            return (htf==null) ? defaultHigherInteraction : htf.getInteraction(tup.pos.get(2), tup.RCs.get(2));
+        }
+        else if(tupSize==4){
+            HigherTupleFinder<T> htf = getHigherOrderTerms( tup.pos.get(0), tup.RCs.get(0), tup.pos.get(1), tup.RCs.get(1) );
+            if(htf==null)
+                return defaultHigherInteraction;
+            htf = htf.getHigherInteractions(tup.pos.get(2), tup.RCs.get(2));
+            return (htf==null) ? defaultHigherInteraction : htf.getInteraction(tup.pos.get(3), tup.RCs.get(3));
         }
         else
             throw new UnsupportedOperationException( "ERROR: Not supporting tuple size " + tupSize );

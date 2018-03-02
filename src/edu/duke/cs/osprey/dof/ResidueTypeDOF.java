@@ -188,4 +188,9 @@ public class ResidueTypeDOF extends DegreeOfFreedom {
     public DOFBlock getBlock(){
         return null;
     }
+    
+        @Override
+    public String getName() {
+        return "RESTYPE"+res.getPDBResNumber();
+    }
 }

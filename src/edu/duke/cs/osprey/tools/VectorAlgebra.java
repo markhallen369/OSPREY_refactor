@@ -75,6 +75,15 @@ public class VectorAlgebra {
         return dist;
     }
     
+    public static double distsq(double[] coords1, int atNum1, double[] coords2, int atNum2){
+        //we're given two arrays of coordinates (concatenated 3-D coordinates of atoms)
+        //get the squared distance between the atoms numbered atNum1 in coords1 and atNum2 in coords2
+        double dx = coords1[3*atNum1] - coords2[3*atNum2];//difference in x coordinates between the two atoms
+        double dy = coords1[3*atNum1+1] - coords2[3*atNum2+1];
+        double dz = coords1[3*atNum1+2] - coords2[3*atNum2+2];
+        return dx*dx + dy*dy + dz*dz;
+    }
+    
     
     
     
@@ -85,6 +94,11 @@ public class VectorAlgebra {
     public static double distance(double[] vec1, double[] vec2){
         return distance(vec1,0,vec2,0);
     }
+    
+    public static double distsq(double[] vec1, double[] vec2){
+        return distsq(vec1,0,vec2,0);
+    }
+
 
     public static double dot(double[] vec1, double[] vec2){
         return vec1[0]*vec2[0]+vec1[1]*vec2[1]+vec1[2]*vec2[2];

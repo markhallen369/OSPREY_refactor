@@ -33,6 +33,19 @@ public class Protractor {
     }
 
     
+    public static double[] getAngleSinCos(double vec1[], double vec2[]){//sine and cosine
+        //sine is always positive for angle between two vectors
+
+        double costh = dot(vec1,vec2) / ( norm(vec1) * norm(vec2) );
+        if( costh > 1)//It might be slightly over due to numerical error...this means the angle is basically 0
+            costh = 1;
+        else if(costh < -1 )
+            costh = -1;
+
+        return new double[] {Math.sqrt(1-costh*costh), costh};
+    }
+    
+    
     public static double getAngleDegrees(double A[], double B[], double C[]){
         return 180. * getAngleRadians(A,B,C) / Math.PI;
     }

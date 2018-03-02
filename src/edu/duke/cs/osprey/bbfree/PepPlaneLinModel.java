@@ -98,13 +98,37 @@ public class PepPlaneLinModel implements Serializable {
     }
     
     
-    public double[] getProjCAtomCoeffs(){
+    /*public double[] getProjCAtomCoeffs(){
         //get coefficients for the plane projection of C
         //as a linear combination of CA1, N, and CA2
         double ans[] = new double[3];
         ans[0] = 1 - CCoeffs.get(0) - CCoeffs.get(1);
         ans[1] = CCoeffs.get(0);
         ans[2] = CCoeffs.get(1);
+        return ans;
+    }*/
+    public double[] getProjCAtomCoeffs(){
+        //get coefficients for the plane projection of C
+        //as a linear combination of CA1, N, and CA2
+        return getProjAtomCoeffs(CCoeffs);
+    }
+    
+    public double[] getProjHAtomCoeffs(){
+        return getProjAtomCoeffs(HCoeffs);
+    }
+    
+    public double[] getProjOAtomCoeffs(){
+        return getProjAtomCoeffs(OCoeffs);
+    }
+    
+    private static double[] getProjAtomCoeffs(DoubleMatrix1D coeffs){
+        //get coefficients for the plane projection of the atom
+        //as a linear combination of CA1, N, and CA2
+        //"regular" coefficients in peptide plane basis (CCoeffs, etc.) provided
+        double ans[] = new double[3];
+        ans[0] = 1 - coeffs.get(0) - coeffs.get(1);
+        ans[1] = coeffs.get(0);
+        ans[2] = coeffs.get(1);
         return ans;
     }
 }

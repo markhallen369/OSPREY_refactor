@@ -1,0 +1,5 @@
+#!/bin/bash
+#DEBUG!!!  Dummy script to test Java code for Poisson-Boltzmann
+echo -802.17
+#echo -802.17 >> Elog.txt
+rm struct.pdb

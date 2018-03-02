@@ -43,6 +43,12 @@ public class PruningMatrix extends TupleMatrixBoolean {
         fill(false);
     }
     
+    
+    public PruningMatrix(int numPos, int[] numAllowedAtPos, double pruningInterval) {
+    	super(numPos, numAllowedAtPos, pruningInterval, false);
+        fill(false);
+    }
+    
     public void unprunedRCsAtPos(ArrayList<Integer> out, int pos) {
     	out.clear();
     	int numRCs = getNumConfAtPos(pos);

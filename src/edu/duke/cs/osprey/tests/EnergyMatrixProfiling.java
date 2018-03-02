@@ -1,5 +1,6 @@
 package edu.duke.cs.osprey.tests;
 
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
@@ -50,7 +51,7 @@ public class EnergyMatrixProfiling {
 			"energyMatrixProfiling",
 			"2KDC.P.forOsprey.pdb", 
 			flexRes, allowedAAs, addWt, doMinimize, useEpic, new EPICSettings(), useTupleExpansion, new LUTESettings(),
-			new DEEPerSettings(), moveableStrands, freeBBZones, useEllipses, useERef, addResEntropy, addWtRots, null, 
+			new DEEPerSettings(), moveableStrands, new CATSSettings(), useEllipses, useERef, addResEntropy, addWtRots, null, 
                         false, new ArrayList<>()
 		);
 		

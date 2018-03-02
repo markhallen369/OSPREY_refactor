@@ -52,5 +52,9 @@ public class SparseFFEnergy implements EnergyFunction {
         return ffEnergy.calculateTotalEnergy();
     }
     
+    public ForcefieldEnergy getFFEnergy() {
+    	return ffEnergy;
+    }
+    
     
 }

@@ -26,20 +26,21 @@ public class EPICEnergyFunction implements EnergyFunction.NeedsInit, EnergyFunct
     DoubleMatrix1D curDOFVals = null;//this needs to be assigned to something
     //(e.g. curDOFVals in a MolecEObjFunction) that will be appropriately adjusted
     
-    boolean useSharedMolec = true;//Evaluate any SAPE terms on a shared molecule for all terms
+    public boolean useSharedMolec = true;//Evaluate any SAPE terms on a shared molecule for all terms
     //(expected to be much faster in terms of doing less conformation setting, so true by default)
     
-    boolean includeMinE = false;//by default, just evaluating the continuous part (not the minE's)
+    public boolean includeMinE = false;//by default, just evaluating the continuous part (not the minE's)
     
     ArrayList<EPoly> terms;//the EPIC terms to evaluate
     
-    ArrayList<ArrayList<Integer>> termDOFs;//for each term, which degrees of freedom (in curDOFVals) it operates on
+    public ArrayList<ArrayList<Integer>> termDOFs;//for each term, which degrees of freedom (in curDOFVals) it operates on
 
     
-    public EPICEnergyFunction(ArrayList<EPoly> terms) {
+    public EPICEnergyFunction(ArrayList<EPoly> terms, boolean includeMinE) {
         //create an energy function from some terms, will assign curDOFVals, termDOFs, and (if needed) sharedMolec
         //later
         this.terms = terms;
+        this.includeMinE = includeMinE;
     }
     
     
@@ -145,6 +146,11 @@ public class EPICEnergyFunction implements EnergyFunction.NeedsInit, EnergyFunct
     }
     
     
+    public ArrayList<EPoly> getTerms(){
+        return terms;
+    }
+    
+    
     public void printAllTermValues() {
         for(double termVal : allTermValues())
             System.out.println(termVal);
@@ -167,7 +173,7 @@ public class EPICEnergyFunction implements EnergyFunction.NeedsInit, EnergyFunct
                 }
             }
             
-            EPICEnergyFunction partial = new EPICEnergyFunction(dofTerms);
+            EPICEnergyFunction partial = new EPICEnergyFunction(dofTerms,includeMinE);
             partial.init(molec, DOFs, curDOFVals);
             
             ans.add(partial);

@@ -25,7 +25,9 @@ import edu.duke.cs.osprey.restypes.ResidueTemplate;
 import edu.duke.cs.osprey.restypes.ResidueTemplateLibrary;
 import edu.duke.cs.osprey.structure.Residue;
 import edu.duke.cs.osprey.tools.Protractor;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 
 
 /**
@@ -429,5 +431,19 @@ public class PositionConfSpace implements Serializable {
                 maxNumRCs = Math.max(maxNumRCs,count);
             
             return maxNumRCs;
+        }
+        
+        
+        public HashSet<DegreeOfFreedom> getAllConfDOFs(){
+            //get all conformational degrees of freedom bounded by RCs in this position conf space
+            HashSet<DegreeOfFreedom> ans = new HashSet<>();
+            
+            for(RC rc : RCs){
+                for(DegreeOfFreedom dof : rc.DOFs){
+                    ans.add(dof);
+                }
+            }
+            
+            return ans;
         }
 }

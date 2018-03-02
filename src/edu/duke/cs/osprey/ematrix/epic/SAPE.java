@@ -19,6 +19,8 @@ import edu.duke.cs.osprey.tools.ObjectIO;
 import edu.duke.cs.osprey.tools.VectorAlgebra;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  *
@@ -47,10 +49,31 @@ public class SAPE implements Serializable {
     ForcefieldParams ffParams;
     ArrayList<int[]> interactingRes;//list of pairs of interacting residues
     ArrayList<ArrayList<int[]>> atomPairList;//for each pair of interacting residues, list of interacting atom pairs
-    EnergyFunction sharedMolecEnergyFunction = null;//energy function linked to the shared molecule
+    public EnergyFunction sharedMolecEnergyFunction = null;//energy function linked to the shared molecule
+
     
+    public SAPE(SAPE bigSAPE, HashMap<Integer,HashSet<Integer> > atomsToInclude) {
+        //Create a new SAPE including only terms involving the specified atoms
+        //(atomsToInclude maps residue indices to lists of atom indices in the residues)
+        mofStandalone = null;
+        ffParams = bigSAPE.ffParams;
+        interactingRes = bigSAPE.interactingRes;
+        
+        atomPairList = new ArrayList<>();
+        for(int resCount=0; resCount<interactingRes.size(); resCount++){
+            int[] resPair = interactingRes.get(resCount);
+            HashSet<Integer> atoms1 = atomsToInclude.containsKey(resPair[0]) ? atomsToInclude.get(resPair[0]) : new HashSet<>();
+            HashSet<Integer> atoms2 = atomsToInclude.containsKey(resPair[1]) ? atomsToInclude.get(resPair[1]) : new HashSet<>();
+            ArrayList<int[]> curAtomPairList = new ArrayList<>();
+            for(int[] atomPair : bigSAPE.atomPairList.get(resCount)){
+                if( atoms1.contains(atomPair[0]) || atoms2.contains(atomPair[1]) )//include this pair
+                    curAtomPairList.add(atomPair);
+            }
+            atomPairList.add(curAtomPairList);
+        }
+    }
     
-    
+        
     public SAPE (MoleculeModifierAndScorer objFcn, double distCutoff, DoubleMatrix1D[] sampAbs){
         //We'll initialize the SAPE for standalone work, and also
         //initialize information sufficient to reinitialize with a shared molecule
@@ -306,9 +329,11 @@ public class SAPE implements Serializable {
                 Atom atom2 = res2.atoms.get(atNumPair[1]);
                 interactingAtomPairs.add( new Atom[] {atom1,atom2} );
             }
-
-            SparseFFEnergy sparseE = new SparseFFEnergy( interactingAtomPairs, ffParams );
-            ans.addTerm(sparseE);
+            
+            if(!interactingAtomPairs.isEmpty()){
+                SparseFFEnergy sparseE = new SparseFFEnergy( interactingAtomPairs, ffParams );
+                ans.addTerm(sparseE);
+            }
         }
         
         return ans;

@@ -10,6 +10,7 @@ import edu.duke.cs.osprey.confspace.ConfSpace;
 import edu.duke.cs.osprey.confspace.RC;
 import edu.duke.cs.osprey.confspace.RCTuple;
 import edu.duke.cs.osprey.control.EnvironmentVars;
+import edu.duke.cs.osprey.ematrix.epic.DerivEPICFitter;
 import edu.duke.cs.osprey.ematrix.epic.EPICEnergyFunction;
 import edu.duke.cs.osprey.ematrix.epic.EPICFitter;
 import edu.duke.cs.osprey.ematrix.epic.EPICSettings;
@@ -20,6 +21,8 @@ import edu.duke.cs.osprey.energy.MultiTermEnergyFunction;
 import edu.duke.cs.osprey.handlempi.MPISlaveTask;
 import edu.duke.cs.osprey.minimization.CCDMinimizer;
 import edu.duke.cs.osprey.minimization.MoleculeModifierAndScorer;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
+import edu.duke.cs.osprey.plug.RCTuplePolytope;
 import edu.duke.cs.osprey.pruning.PruningMatrix;
 import edu.duke.cs.osprey.structure.Residue;
 import java.util.ArrayList;
@@ -63,6 +66,8 @@ public class TermECalculator implements MPISlaveTask {
     HashMap<ArrayList<Integer>, Double> nBodyE = new HashMap<>();
     ArrayList<MoleculeModifierAndScorer> mofs = null;
     
+    private PolytopeMatrix plugMat;
+    
     
     private static final boolean SAPEKeepStandalone = false;
     //Make SAPE terms in the EPIC matrix retain ability to be evaluated standalone
@@ -71,7 +76,7 @@ public class TermECalculator implements MPISlaveTask {
     
     public TermECalculator(ConfSpace s, ArrayList<Residue> shellResidues, 
             boolean doEPIC, boolean doIntra, PruningMatrix prm, EPICSettings es, 
-            boolean addResEnt, int... resToCalc){
+            boolean addResEnt, PolytopeMatrix plugM, int... resToCalc){
         
         confSpace = s;
         doingEPIC = doEPIC;
@@ -80,6 +85,7 @@ public class TermECalculator implements MPISlaveTask {
         pruneMat = prm;
         epicSettings = es;
         addResEntropy = addResEnt;
+        plugMat = plugM;
         
         Residue firstRes = confSpace.posFlex.get(res[0]).res;
         
@@ -408,8 +414,8 @@ public class TermECalculator implements MPISlaveTask {
             //Do the EPIC series fits for this rotamer pair
             //we are given an energy objective function valid on the voxel,
             //plus the energy and DOF values for the minimum-energy point
-
-            EPICFitter fitter = new EPICFitter(mof,epicSettings,bestDOFVals,minEnergy);
+            RCTuplePolytope tope = plugMat==null ? null : plugMat.getTupleValue(RCList);
+            EPICFitter fitter = new /*Deriv*/EPICFitter(mof,epicSettings,bestDOFVals,minEnergy,tope);//DEBUG!!
             
             EPoly bestFit = null;
             
@@ -420,9 +426,10 @@ public class TermECalculator implements MPISlaveTask {
                 int bestBound = -1;
                 ArrayList<EPoly> series = new ArrayList<>();//list of fit series
                   
-                for( int boundCount=0; bestResid>epicSettings.EPICGoalResid && curFitParams!=null; boundCount++ ){
+                for(int boundCount=0; bestResid>epicSettings.EPICGoalResid && curFitParams!=null; boundCount++){
                     
-                    System.out.println("FIT NUMBER "+boundCount+": "+curFitParams.getDescription());
+                    if(EPICFitter.verbose)
+                        System.out.println("FIT NUMBER "+boundCount+": "+curFitParams.getDescription());
                     
                     EPoly curSeries;
                     try{
@@ -430,7 +437,7 @@ public class TermECalculator implements MPISlaveTask {
                     }
                     catch(Exception e){//sometimes singular matrices will arise during fitting
                         //if so we skip that order.  More SAPE etc. might help
-                        System.err.println("Fit failed: "+e.getMessage());
+                        System.err.println("Fit failed: "+e.getMessage()+" for "+curFitParams.getDescription());
                         e.printStackTrace();
                         series.add(null);
                         
@@ -462,11 +469,14 @@ public class TermECalculator implements MPISlaveTask {
                 }
                 
                 if(bestResid > epicSettings.EPICGoalResid){
-                    System.out.println("Failed to reach goal residual.");
+                    System.out.println("Failed to reach goal residual for "+RCList.stringListing()
+                            +".  Best residual: "+bestResid);
                 }
-                System.out.println("Best residual: "+bestResid+" for bound number "+bestBound);
+                if(EPICFitter.verbose)
+                    System.out.println("Best residual: "+bestResid+" for bound number "+bestBound);
 
-                printFitTests(fitter, RCList, minEnergy, mof, bestDOFVals, series);
+                if(EPICFitter.verbose)
+                    printFitTests(fitter, RCList, minEnergy, mof, bestDOFVals, series);
 
                 bestFit = series.get(bestBound);
             }
@@ -545,7 +555,7 @@ public class TermECalculator implements MPISlaveTask {
         
         ArrayList<EPoly> termList = new ArrayList<>();
         termList.add(term);
-        EPICEnergyFunction epicEF = new EPICEnergyFunction(termList);
+        EPICEnergyFunction epicEF = new EPICEnergyFunction(termList,false);
         
         MoleculeModifierAndScorer ofEPIC = new MoleculeModifierAndScorer( epicEF, mof.getConstraints(),
                 mof.getMolec(), mof.getDOFs() );
@@ -561,8 +571,10 @@ public class TermECalculator implements MPISlaveTask {
         double tol = 0.1;//we'll only consider this a problem if the minimum
         //(where EPIC should be pretty accurate) is well below the actual minimum
         if(lowPointEPICE < lowPointTrueE - tol){
-            System.out.println("Rejecting fit because of low minimum for EPIC term, "
+            if(EPICFitter.verbose){
+                System.out.println("Rejecting fit because of low minimum for EPIC term, "
                     +lowPointEPICE+".  Corresponding true E: "+lowPointTrueE);
+            }
             return false;
         }
         

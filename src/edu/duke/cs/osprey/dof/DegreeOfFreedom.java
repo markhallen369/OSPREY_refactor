@@ -7,6 +7,8 @@ package edu.duke.cs.osprey.dof;
 import edu.duke.cs.osprey.structure.Molecule;
 import edu.duke.cs.osprey.structure.Residue;
 import java.io.Serializable;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  *
@@ -24,6 +26,8 @@ public abstract class DegreeOfFreedom implements Serializable {
     private static final long serialVersionUID = 3348198591978172994L;
     
     double curVal;
+    
+    public double confDOFNum = -1;//number among confDOFs in a confSpace
     
     public abstract void apply(double paramVal);//apply the given parameter value
     //(some degrees of freedom may have convenience methods to call this, e.g. mutation called by aa type)
@@ -47,5 +51,22 @@ public abstract class DegreeOfFreedom implements Serializable {
     }
     
     public abstract DOFBlock getBlock();//return the DOF block for a DOF (return null if none)
-
+    
+    
+    public List<Residue> listAffectedResidues(){
+        Residue res = getResidue();
+        if(res!=null)
+            return Arrays.asList(res);
+        
+        DOFBlock block = getBlock();
+        if(block==null)
+            throw new RuntimeException("ERROR: Can't list affected residues if neither single residue nor block specified");
+        else
+            return block.listResidues();
+    }
+    
+    
+    public abstract String getName();//make a name for this DOF
+    //should suffice to uniquely identify the DOF among DOFs that appear in a given system
+    //but should be the same for equivalent DOFs in different copies of a system
 }

@@ -156,7 +156,8 @@ public class SubThreshSampler {
     void burnIn(DoubleMatrix1D startingPoint){
         //burn in the sampler and figure out scale for sampling and how often to use a sample
         
-        System.out.println("Starting burn-in for SubThreshSampler.  x="+startingPoint);
+        if(EPICFitter.verbose)
+            System.out.println("Starting burn-in for SubThreshSampler.  x="+startingPoint);
         
         x = startingPoint;
 
@@ -222,10 +223,12 @@ public class SubThreshSampler {
                 }
             }
             
-            if(done)
-                System.out.println("Burn-in complete at sample "+b);
-            else if( (b+1)%1000000 == 0 )
-                System.out.println("Burn-in sample "+b+" done.  x: "+x);
+            if(EPICFitter.verbose){
+                if(done)
+                    System.out.println("Burn-in complete at sample "+b);
+                else if( (b+1)%1000000 == 0 )
+                    System.out.println("Burn-in sample "+b+" done.  x: "+x);
+            }
         }
         
         //we can get a useFrequency from the second half
@@ -270,7 +273,8 @@ public class SubThreshSampler {
                 //autocorrelation should ultimately drop to 0, and it may have negative values
                 //but it may be comparable to variance for very small uf
                 useFrequency = uf;
-                System.out.println("Setting useFrequency="+useFrequency+".  Variance: "+var+" Autocorr: "+autocorr);
+                if(EPICFitter.verbose)
+                    System.out.println("Setting useFrequency="+useFrequency+".  Variance: "+var+" Autocorr: "+autocorr);
                 break;
             }
                         
@@ -317,7 +321,8 @@ public class SubThreshSampler {
             }
         }
         
-        System.out.println("Tuned scale for SubThreshSampler: "+samplingScale);
+        if(EPICFitter.verbose)
+            System.out.println("Tuned scale for SubThreshSampler: "+samplingScale);
     }
     
     

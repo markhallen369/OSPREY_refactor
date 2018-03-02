@@ -16,8 +16,10 @@ import edu.duke.cs.osprey.ematrix.epic.EPICSettings;
 import edu.duke.cs.osprey.ematrix.epic.EPoly;
 import edu.duke.cs.osprey.handlempi.MPIMaster;
 import edu.duke.cs.osprey.handlempi.MPISlaveTask;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 import edu.duke.cs.osprey.pruning.PruningMatrix;
 import edu.duke.cs.osprey.structure.Residue;
+import edu.duke.cs.osprey.tools.ObjectIO;
 
 /**
  *
@@ -44,6 +46,10 @@ public class EnergyMatrixCalculator {
     private EnergyMatrix emat = null;
     private EPICMatrix epicMat = null;
     
+    private PolytopeMatrix plugMat = null;
+    
+    boolean epicIsResumable = true;//DEBUG!!
+    EPICPrecompResumer resumer = null;
     
     //constructor for calculating a scalar energy matrix (rigid or pairwise lower bounds)
     public EnergyMatrixCalculator(ConfSpace s, ArrayList<Residue> sr, boolean useERef, 
@@ -58,12 +64,13 @@ public class EnergyMatrixCalculator {
     
     
     //Constructor for calculating an EPIC matrix
-    public EnergyMatrixCalculator(ConfSpace s, ArrayList<Residue> sr, PruningMatrix pr, EPICSettings es){
+    public EnergyMatrixCalculator(ConfSpace s, ArrayList<Residue> sr, PruningMatrix pr, EPICSettings es, PolytopeMatrix pm){
         searchSpace = s;
         shellResidues = sr;
         doEPIC = true;
         pruneMat = pr;
         epicSettings = es;
+        plugMat = pm;
     }
     
     
@@ -86,7 +93,7 @@ public class EnergyMatrixCalculator {
 		// merge residues at the specified positions; this updates the energy matrix.
 		// the energy matrix currently only support pairs and triples
 		TermECalculator hotECalc = new TermECalculator(searchSpace, shellResidues, 
-				doEPIC, doIntra, pruneMat, epicSettings, addResEntropy, posNums);
+				doEPIC, doIntra, pruneMat, epicSettings, addResEntropy, plugMat, posNums);
 
 		Object hotEnergies = hotECalc.doCalculation();
 		storeEnergy(hotEnergies, posNums);
@@ -121,27 +128,37 @@ public class EnergyMatrixCalculator {
     
     public void calcPEMLocally(){
         //do the energy calculation here
-        
+                
         for(int res=0; res<searchSpace.numPos; res++){
             
-            System.out.println("Starting intra+shell energy calculations for residue "+res);
-            
-            TermECalculator oneBodyECalc = new TermECalculator(searchSpace,shellResidues,doEPIC,
-                    false,pruneMat,epicSettings,addResEntropy,res);
-            
-            Object oneBodyE = oneBodyECalc.doCalculation();
-            storeEnergy(oneBodyE, res);
+            if(needToCalcRes(res)){
+                System.out.println("Starting intra+shell energy calculations for residue "+res);
 
-            for(int res2=0; res2<res; res2++){
+                TermECalculator oneBodyECalc = new TermECalculator(searchSpace,shellResidues,doEPIC,
+                        false,pruneMat,epicSettings,addResEntropy,plugMat,res);
+
+                Object oneBodyE = oneBodyECalc.doCalculation();
+                storeEnergy(oneBodyE, res);
+
+                for(int res2=0; res2<res; res2++){
+
+                    System.out.println("Starting pairwise energy calculations for residues "+res+", "+res2);
+
+                    TermECalculator pairECalc = new TermECalculator(searchSpace,shellResidues,doEPIC,
+                            false,pruneMat,epicSettings,false,plugMat,res,res2);
+                    Object pairE = pairECalc.doCalculation();
+                    storeEnergy(pairE, res, res2);
+                }
                 
-                System.out.println("Starting pairwise energy calculations for residues "+res+", "+res2);
-                
-                TermECalculator pairECalc = new TermECalculator(searchSpace,shellResidues,doEPIC,
-                        false,pruneMat,epicSettings,false,res,res2);
-                Object pairE = pairECalc.doCalculation();
-                storeEnergy(pairE, res, res2);
+                if(resumer!=null){
+                    resumer.curRes++;//current residue finished
+                    resumer.saveIfTime();
+                }
             }
         }
+        
+        if(resumer!=null)
+            resumer.deleteFile();
     }
     
     
@@ -156,11 +173,11 @@ public class EnergyMatrixCalculator {
         for(int res=0; res<searchSpace.numPos; res++){
             
             tasks.add( new TermECalculator(searchSpace,shellResidues,doEPIC,false,
-                    pruneMat,epicSettings,addResEntropy,res) );
+                    pruneMat,epicSettings,addResEntropy,plugMat,res) );
 
             for(int res2=0; res2<res; res2++)
                 tasks.add( new TermECalculator(searchSpace,shellResidues,doEPIC,false,
-                        pruneMat,epicSettings,false,res,res2) );
+                        pruneMat,epicSettings,false,plugMat,res,res2) );
         }
         
         ArrayList<Object> calcResults = mm.handleTasks(tasks);
@@ -183,8 +200,12 @@ public class EnergyMatrixCalculator {
     
     private void initMatrix(){
         //initialize the matrix we're calculating
-        if(doEPIC)
-            epicMat = new EPICMatrix(searchSpace, pruneMat.getPruningInterval());
+        if(doEPIC){
+            if(epicIsResumable)
+                makeResumer();
+            else
+                epicMat = new EPICMatrix(searchSpace, pruneMat.getPruningInterval());
+        }
         else
             emat = new EnergyMatrix(searchSpace, Double.POSITIVE_INFINITY);
             //all RCs included (infinite pruning interval)
@@ -245,6 +266,32 @@ public class EnergyMatrixCalculator {
             throw new RuntimeException("ERROR: EPIC matrix is null after calculation");
         
         return epicMat;
+    }
+    
+    
+    
+    private void makeResumer(){
+        //See if we have an active EPICPrecompResumer on disk; load if there is
+        String fileName = "EPIC.RESUME.tmp";
+        resumer = (EPICPrecompResumer) ObjectIO.readObject(fileName, true);
+        if(resumer==null){
+            epicMat = new EPICMatrix(searchSpace, pruneMat.getPruningInterval());
+            resumer = new EPICPrecompResumer(epicMat, fileName);
+        }
+        else{
+            epicMat = resumer.partialMtx;
+            searchSpace = epicMat.getConfSpace();//need to keep these synced
+            ArrayList<Residue> transferredShellRes = new ArrayList<>();//shell res must match too
+            for(Residue res : shellResidues)
+                transferredShellRes.add(searchSpace.m.getResByPDBResNumber(res.getPDBResNumber()));
+            shellResidues = transferredShellRes;
+        }
+    }
+    
+    private boolean needToCalcRes(int res){
+        if(resumer==null)
+            return true;
+        return res >= resumer.curRes;//If resuming, previous run didn't pass res
     }
     
     

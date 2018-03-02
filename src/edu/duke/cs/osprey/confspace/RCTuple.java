@@ -153,6 +153,44 @@ public class RCTuple implements Serializable {
         return new RCTuple(newPos,newRCs);
     }
     
+    
+    public RCTuple copy(){
+        ArrayList<Integer> newPos = new ArrayList<>();
+        ArrayList<Integer> newRCs = new ArrayList<>();
+        
+        for(int ind=0; ind<pos.size(); ind++){
+            newPos.add(pos.get(ind));
+            newRCs.add(RCs.get(ind));
+        }
+        
+        return new RCTuple(newPos,newRCs);
+    }
+    
+    public RCTuple subtractPos(int posToRemove){
+        //Like subtractMember but the actual position number is passed in
+        //again makes a copy
+        ArrayList<Integer> newPos = new ArrayList<>();
+        ArrayList<Integer> newRCs = new ArrayList<>();
+        
+        for(int ind=0; ind<pos.size(); ind++){
+            if(pos.get(ind)!=posToRemove){
+                newPos.add(pos.get(ind));
+                newRCs.add(RCs.get(ind));
+            }
+        }
+        
+        return new RCTuple(newPos,newRCs);
+    }
+    
+    public int RCAtPos(int posToFind){//get rc corresponding to specified pos
+        for(int ind=0; ind<pos.size(); ind++){
+            if(pos.get(ind)==posToFind){
+                return RCs.get(ind);
+            }
+        }
+        return -1;
+    }
+    
     @SuppressWarnings("unchecked")
 	public RCTuple addRC(int addedPos, int addedRC){
         //Make a copy of this RCTuple with (addPos,addRC) added

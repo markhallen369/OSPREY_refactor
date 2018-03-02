@@ -5,6 +5,7 @@
  */
 package edu.duke.cs.osprey.tupexp;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -15,7 +16,7 @@ import java.util.Arrays;
  * 
  * @author mhall44
  */
-class FittingObjFcn {
+class FittingObjFcn implements Serializable {
     
     //OK let's do basic least squares for true values up to thresh
     double thresh = Double.POSITIVE_INFINITY;

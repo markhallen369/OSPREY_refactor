@@ -1,0 +1,17 @@
+Warning: deleting unrecognized or incomplete residue HIE L1046 
+Warning: deleting unrecognized or incomplete residue HIE L1037 
+Warning: deleting unrecognized or incomplete residue HIE L 886 
+Warning: deleting unrecognized or incomplete residue SER L 847 
+Warning: deleting unrecognized or incomplete residue HIE H 833 
+Warning: deleting unrecognized or incomplete residue HIE H 797 
+Warning: deleting unrecognized or incomplete residue GLY H 767 
+Warning: deleting unrecognized or incomplete residue HIE H 737 
+Warning: deleting unrecognized or incomplete residue TYS H 727 
+Warning: deleting unrecognized or incomplete residue TYS H 726 
+Warning: deleting unrecognized or incomplete residue HIE H 675 
+Warning: deleting unrecognized or incomplete residue HIE H 650 
+Warning: deleting unrecognized or incomplete residue ARG H 618 
+Warning: deleting unrecognized or incomplete residue LEU G 567 
+Warning: deleting unrecognized or incomplete residue HIE G 544 
+Warning: deleting unrecognized or incomplete residue ARG G 541 
+Warning: deleting unrecognized or incomplete residue THR G 528 

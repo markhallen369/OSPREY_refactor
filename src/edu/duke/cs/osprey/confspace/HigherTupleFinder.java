@@ -165,7 +165,9 @@ public class HigherTupleFinder<T> implements Serializable {
                 
                 for(int rc : interactions.get(interactionNum).keySet()){
                     
-                    if(interactions.get(interactionNum).get(rc) == val){
+                    if(interactions.get(interactionNum).get(rc).equals(val)){
+                        //watch out, comparing boxed & unboxed with == gives false even if the same
+                        //use equals()
                         tupList.add( new RCTuple(pos,rc) );
                     }
                 }

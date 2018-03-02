@@ -32,9 +32,10 @@ public interface ConfSearchFactory {
 						throw new Error("energy matrix doesn't match pruning matrix, this is a bug");
 					}
 					
-					if (search.searchNeedsHigherOrderTerms() || search.useEPIC) {
+					if (search.searchNeedsHigherOrderTerms() || search.useEPIC || search.useTupExpForSearch) {
 				
 						// if we need higher-order or EPIC terms, use the old A* code
+                                                //also do this for LUTE!  This make function is called on the non-LUTE ematrix
 						return ConfTree.makeFull(search, pmat);
 					}
 					

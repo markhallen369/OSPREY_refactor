@@ -21,6 +21,7 @@ import edu.duke.cs.osprey.structure.Molecule;
 import edu.duke.cs.osprey.structure.Residue;
 import edu.duke.cs.osprey.tools.RigidBodyMotion;
 import edu.duke.cs.osprey.tools.RotationMatrix;
+import edu.duke.cs.osprey.tools.VectorAlgebra;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,7 +32,9 @@ import java.util.List;
  *
  * This is a set of consecutive residues whose backbones can move freely,
  * subject to distance, angle, and omega constraints
- * The freely moving zone is anchored fix CA's at either end
+ * If fixAnchors, then the freely moving zone is anchored fix CA's at either end
+ * Else, then the free DOFs account for the BB conf from one anchor CA to the next,
+ * and then anything beyond the anchors is placed onto that
  * 
  * @author mhall44
  */
@@ -39,6 +42,9 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     
     List<Residue> residues;//the residues moving freely, in order 
     //including the two end ones (only carboxyl or amine moving freely)
+    
+    int numFreeDOFs;
+    int numFullDOFs;
     
     ArrayList<BBFreeDOF> freeDOFs = new ArrayList<>();
     
@@ -64,18 +70,61 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     
     ArrayList<ArrayList<JacDerivEntry>> jacDerivs;
     
+    boolean fixAnchors = true;
+    boolean tooBigForSeries = false;//voxel too big for series; will probably be split
+    
+    ArrayList<Double> targetConstrVals;
+    
+    boolean useDistSqrt = true;//DEBUG!!!  use actual distances instead of quadratic constr
     
     public BBFreeBlock(){
         
     }
     
-    public BBFreeBlock(List<Residue> residues){
+    public BBFreeBlock(List<Residue> residues, boolean fixAnchors){
         // Calculate the free DOFs, indicate appropriate voxels for them
         // and fit polynomials to express the full set of polynomials as a function of them
+        init(residues,fixAnchors);
+        setVoxelBySeries();//set voxel, adjust size if needed to ensure series validity
+        //to specified residual in constraints at indicated fullDOF vals (maybe 0.01 distance err?)
+    }
+    
+    
+    
+    public BBFreeBlock(List<Residue> residues, boolean fixAnchors, double[] voxLim, boolean tooBigForSeries){
+        // Impose custom DOF limits
+        init(residues,fixAnchors);
+        this.tooBigForSeries = tooBigForSeries;
+
+        freeDOFVoxel = new double[2][numFreeDOFs];
+        for(int dof=0; dof<numFreeDOFs; dof++){
+            freeDOFVoxel[0][dof] = -voxLim[dof];
+            freeDOFVoxel[1][dof] = voxLim[dof];
+        }
+        //THESE ARE RELATIVE TO CENTER
         
+        VoxelSeriesChecker vsc = new VoxelSeriesChecker(residues,numFreeDOFs,numFullDOFs,
+            fullDOFPolys, pepPlanes, freeDOFMatrix, freeDOFCenter, fixAnchors, useDistSqrt);
+        if(tooBigForSeries){
+            System.out.println("Created voxel too big for series.");
+        }
+        else{
+            double resid = vsc.getConstraintsResid(freeDOFVoxel);
+            System.out.println("Manually created BBFreeBlock voxel.  Resid: "+resid);
+        }
+        
+        targetConstrVals = vsc.targetConstraintVals;
+    }
+    
+    
+    
+    
+    private void init(List<Residue> residues, boolean fixAnchors){        
+        this.fixAnchors = fixAnchors;
         this.residues = residues;
         int numRes = residues.size();
-        int numFreeDOFs = 2*numRes-6;
+        numFreeDOFs = fixAnchors ? 2*numRes-6 : 2*numRes+2;
+        numFullDOFs = fixAnchors ? 6*numRes-9 : 6*numRes-3;
         
         pepPlanes = new PepPlaneLinModel[numRes-1];
         for(int planeNum=0; planeNum<numRes-1; planeNum++)
@@ -85,25 +134,35 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         DoubleMatrix2D constrJac = getConstrJac();//Evaluate at current CA, N coords
         DoubleMatrix2D freeDOFCoeffs = getOrthogVectors(constrJac);
         
+        
+        //DEBUG!!!!!!
+        //freeDOFCoeffs = selectLocalizableCoeffs(constrJac,freeDOFCoeffs);
+        
         freeDOFMatrix = Algebra.DEFAULT.transpose(freeDOFCoeffs);
         
         for(int freeDOF=0; freeDOF<numFreeDOFs; freeDOF++){
             freeDOFs.add( new BBFreeDOF(freeDOFCoeffs.viewColumn(freeDOF), this, freeDOFs.size()) );
         }
         
-        fullDOFCenter = new double[6*numRes-9];
+        fullDOFCenter = new double[numFullDOFs];
         
-        //Pick voxels?  START W/ UNIT CUBE in middle fading quadratically
-        //The function 1 - 4(x-0.5)^2 goes from 0 to 1 to 0 on the unit interval
-        //the "anchoring" fully fixed res are effectively residues # -1 and numRes
-        for(int resNum=1; resNum<numRes; resNum++){
-            
-            Residue curRes = residues.get(resNum);
-            //set init coords
-            System.arraycopy(curRes.getCoordsByAtomName("N"), 0, fullDOFCenter, 6*(resNum-1), 3);
-            if(resNum<numRes-1)//CA free too
-                System.arraycopy(curRes.getCoordsByAtomName("CA"), 0, fullDOFCenter, 6*resNum-3, 3);
-        }        
+        if(fixAnchors) {
+            for(int resNum=1; resNum<numRes; resNum++){
+                Residue curRes = residues.get(resNum);
+                //set init coords
+                System.arraycopy(curRes.getCoordsByAtomName("N"), 0, fullDOFCenter, 6*(resNum-1), 3);
+                if(resNum<numRes-1)//CA free too
+                    System.arraycopy(curRes.getCoordsByAtomName("CA"), 0, fullDOFCenter, 6*resNum-3, 3);
+            }
+        }
+        else {
+            for(int resNum=0; resNum<numRes; resNum++){
+                Residue curRes = residues.get(resNum);
+                if(resNum>0)
+                    System.arraycopy(curRes.getCoordsByAtomName("N"), 0, fullDOFCenter, 6*resNum-3, 3);
+                System.arraycopy(curRes.getCoordsByAtomName("CA"), 0, fullDOFCenter, 6*resNum, 3);
+            }
+        }
 
         freeDOFCenter = DoubleFactory1D.dense.make(numFreeDOFs);
         for(int f=0; f<numFreeDOFs; f++)
@@ -115,18 +174,11 @@ public class BBFreeBlock implements Serializable, DOFBlock {
                 } );//Jacobian of free DOFs and then constr vars
         makeTaylorSeries(J);
         
-        setVoxelBySeries();//set voxel, adjust size if needed to ensure series validity
-        //to specified residual in constraints at indicated fullDOF vals (maybe 0.01 distance err?)
-        
         curFreeDOFVals = new double[numFreeDOFs];//freeDOFCenter.copy().toArray();//may move away from center, so copy
         //treating these as relative!  for voxel and setDOFs purposes
     }
     
-    private void setVoxelBySeries(){
-        int numRes = residues.size();
-        int numFreeDOFs = 2*numRes-6;
-        int numFullDOFs = 6*numRes-9;
-        
+    private void setVoxelBySeries(){        
         freeDOFVoxel = new double[2][numFreeDOFs];
         Arrays.fill(freeDOFVoxel[0],-1);
         Arrays.fill(freeDOFVoxel[1],1);
@@ -136,7 +188,7 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         
         double targetResid = 1e-4;//max residual allowed in bond lengths or dot products
         VoxelSeriesChecker vsc = new VoxelSeriesChecker(residues,numFreeDOFs,numFullDOFs,
-            fullDOFPolys, pepPlanes, freeDOFMatrix, freeDOFCenter);
+            fullDOFPolys, pepPlanes, freeDOFMatrix, freeDOFCenter, fixAnchors, useDistSqrt);
         
         
         double resid = vsc.getConstraintsResid(freeDOFVoxel);
@@ -153,6 +205,8 @@ public class BBFreeBlock implements Serializable, DOFBlock {
             
             System.out.println("Voxel reduced resid: "+resid);
         }
+        
+        targetConstrVals = vsc.targetConstraintVals;
     }
     
     
@@ -174,10 +228,15 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         deriv1 = new double[numFullDOFs][numFullDOFs];
         wderiv2 = new double[numFullDOFs][numFullDOFs][numFullDOFs];
         deriv2 = new double[numFullDOFs][numFullDOFs][numFreeDOFs];
-        wderiv3 = new double[numFullDOFs][numFullDOFs][numFullDOFs][numFreeDOFs];
-        deriv3 = new double[numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs];
-        wderiv4 = new double[numFullDOFs][numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs];
-        deriv4 = new double[numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs][numFreeDOFs];
+        
+        if(polyOrder>=3){
+            wderiv3 = new double[numFullDOFs][numFullDOFs][numFullDOFs][numFreeDOFs];
+            deriv3 = new double[numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs];
+            if(polyOrder>=4){
+                wderiv4 = new double[numFullDOFs][numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs];
+                deriv4 = new double[numFullDOFs][numFullDOFs][numFreeDOFs][numFreeDOFs][numFreeDOFs];
+            }
+        }
     }
     
     private void calcDerivs(int numFullDOFs, int numFreeDOFs, DoubleMatrix2D Jinv){
@@ -276,8 +335,6 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         //J is d(freeDOFs,constrVars)/d(fullDOFs)
         
         
-        int numFullDOFs = 6*residues.size() - 9;
-        int numFreeDOFs = 2*residues.size() - 6;
         int numParams = SeriesFitter.getNumParams(numFreeDOFs, true, polyOrder);
         
         DoubleMatrix2D Jinv = Algebra.DEFAULT.inverse(J);//d(fullDOFs)/d(freeDOFs,constrVars)
@@ -385,9 +442,20 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         copiedBlock.pepPlanes = pepPlanes;
         copiedBlock.freeDOFMatrix = freeDOFMatrix;
         copiedBlock.jacDerivs = jacDerivs;
+        
+        copiedBlock.targetConstrVals = targetConstrVals;
+        copiedBlock.tooBigForSeries = tooBigForSeries;
+        copiedBlock.fixAnchors = fixAnchors;
+        copiedBlock.numFreeDOFs = numFreeDOFs;
+        copiedBlock.numFullDOFs = numFullDOFs;
         //no need to copy all the deriv1, deriv2, etc. since they're just used to construct the block
         
         return copiedBlock;
+    }
+
+    @Override
+    public List<Residue> listResidues() {
+        return residues;
     }
     
     
@@ -412,7 +480,7 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         return - Minv.get(i, u) * Minv.get(v, j);
     }
     
-    private DoubleMatrix2D getOrthogVectors(DoubleMatrix2D M){
+    public static DoubleMatrix2D getOrthogVectors(DoubleMatrix2D M){
         //Get a matrix whose columns are orthogonal to the row space of M
         //which expected to be nonsingular
         DoubleMatrix2D Maug = DoubleFactory2D.dense.make(M.columns(), M.columns());
@@ -437,12 +505,10 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     }
     
     
-    private DoubleMatrix2D getConstrJac(){
+    public DoubleMatrix2D getConstrJac(){
         //Jacobian constraints, evaluated at current (original) coordinates
         
         int numRes = residues.size();
-        int numFullDOFs = 6*numRes-9;
-        int numFreeDOFs = 2*numRes-6;
         
         jacDerivs = new ArrayList<ArrayList<JacDerivEntry>>();
         for(int f=0; f<numFullDOFs; f++)
@@ -459,40 +525,43 @@ public class BBFreeBlock implements Serializable, DOFBlock {
             
             double NCoord[] = curRes.getCoordsByAtomName("N");
             double CACoord[] = curRes.getCoordsByAtomName("CA");
-            
+            int NFreeIndex = fixAnchors ? 2*(resNum-1) : 2*resNum-1;//index of N among free atoms
+
             if(resNum>0){//these constrs act only on fixed coords for resNum=0
                 
                 Residue prevRes = residues.get(resNum-1);
                 double prevCACoord[] = prevRes.getCoordsByAtomName("CA");
                 
                 //N to CA constr for resNum
-                makeDistConstrJac(ans,constrCount,NCoord,CACoord,2*(resNum-1),2*resNum-1);
+                makeDistConstrJac(ans,constrCount,NCoord,CACoord,NFreeIndex,NFreeIndex+1);
                 constrCount++;
 
                 //CA to CA constr
-                makeDistConstrJac(ans,constrCount,prevCACoord,CACoord,2*resNum-3,2*resNum-1);
+                makeDistConstrJac(ans,constrCount,prevCACoord,CACoord,NFreeIndex-1,NFreeIndex+1);
                 constrCount++;
 
                 //last CA to N constr
-                makeDistConstrJac(ans,constrCount,prevCACoord,NCoord,2*resNum-3,2*(resNum-1));
+                makeDistConstrJac(ans,constrCount,prevCACoord,NCoord,NFreeIndex-1,NFreeIndex);
                 constrCount++;
             }
             
             //OK and finally N-CA-C' angle constr
-            if(resNum==numRes-1){//C' fixed: special form of constraint
-                double CCoord[] = curRes.getCoordsByAtomName("C");
-                makeLastNCACCConstrJac( ans, constrCount, CACoord, CCoord, 2*(resNum-1) );
+            if(resNum==numRes-1){
+                if(fixAnchors){//C' fixed: special form of constraint
+                    double CCoord[] = curRes.getCoordsByAtomName("C");
+                    makeLastNCACCConstrJac( ans, constrCount, CACoord, CCoord, NFreeIndex );
+                    constrCount++;
+                }
             }
-            else {
+            else if ( fixAnchors || resNum>0 ){
                 Residue nextRes = residues.get(resNum+1);
                 double NCoordNext[] = nextRes.getCoordsByAtomName("N");
                 double CACoordNext[] = nextRes.getCoordsByAtomName("CA");
 
                 makeNCACCConstrJac(ans, constrCount, NCoord, CACoord, 
-                    NCoordNext, CACoordNext, 2*(resNum-1), resNum);
+                    NCoordNext, CACoordNext, NFreeIndex, resNum);
+                constrCount++;
             }
-            
-            constrCount++;
         }
                 
         return ans;
@@ -500,7 +569,6 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     
     
     private void recordJacDeriv(int constrNum, int fullDOF1, int fullDOF2, double val){
-        int numFreeDOFs = 2*residues.size()-6;
         jacDerivs.get(fullDOF1).add( new JacDerivEntry(constrNum+numFreeDOFs,fullDOF2,val) );
     }
     
@@ -512,21 +580,55 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         //in constrJac.  Atom numbers (among free N, CA) and (initial) coordinates given
         //-1 for atomNum means fixed atom, so not part of gradient
         
-        for(int dim=0; dim<3; dim++){
-            if(atomNum1>=0 && 3*atomNum1<constrJac.columns()){
-                constrJac.set(constrNum, 3*atomNum1+dim, 2*coord1[dim]-2*coord2[dim]);
-                
-                recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum1+dim, 2);
-                if(atomNum2>=0 && 3*atomNum2<constrJac.columns())//atomNum2 free to move
-                    recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum2+dim, -2);
+        if(useDistSqrt){
+            double dist = VectorAlgebra.distance(coord1, coord2);
+            for(int dim=0; dim<3; dim++){
+                if(atomNum1>=0 && 3*atomNum1<constrJac.columns()){
+                    double diff = coord1[dim]-coord2[dim];
+                    constrJac.set(constrNum, 3*atomNum1+dim, diff/dist );
+                    
+                    for(int dim2=0; dim2<3; dim2++){
+                        double secondDeriv = -diff*(coord1[dim2]-coord2[dim2]) / (dist*dist*dist);
+                        if(dim==dim2)
+                            secondDeriv += 1/dist;
+                        recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum1+dim2, secondDeriv);
+                        if(atomNum2>=0 && 3*atomNum2<constrJac.columns())//atomNum2 free to move
+                            recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum2+dim2, -secondDeriv);
+                    }
+                }
+
+                if(atomNum2>=0 && 3*atomNum2<constrJac.columns()){
+                    double diff = coord2[dim]-coord1[dim];
+                    constrJac.set(constrNum, 3*atomNum2+dim, diff/dist );
+                    
+                    for(int dim2=0; dim2<3; dim2++){
+                        double secondDeriv = -diff*(coord2[dim2]-coord1[dim2]) / (dist*dist*dist);
+                        if(dim==dim2)
+                            secondDeriv += 1/dist;
+                        recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum2+dim2, secondDeriv);
+                        if(atomNum1>=0 && 3*atomNum1<constrJac.columns())//atomNum1 free to move
+                            recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum1+dim2, -secondDeriv);
+                    }
+                }
             }
-            
-            if(atomNum2>=0 && 3*atomNum2<constrJac.columns()){
-                constrJac.set(constrNum, 3*atomNum2+dim, 2*coord2[dim]-2*coord1[dim]);
-                
-                recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum2+dim, 2);
-                if(atomNum1>=0 && 3*atomNum1<constrJac.columns())//atomNum1 free to move
-                    recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum1+dim, -2);
+        }
+        else {
+            for(int dim=0; dim<3; dim++){
+                if(atomNum1>=0 && 3*atomNum1<constrJac.columns()){
+                    constrJac.set(constrNum, 3*atomNum1+dim, 2*coord1[dim]-2*coord2[dim]);
+
+                    recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum1+dim, 2);
+                    if(atomNum2>=0 && 3*atomNum2<constrJac.columns())//atomNum2 free to move
+                        recordJacDeriv(constrNum, 3*atomNum1+dim, 3*atomNum2+dim, -2);
+                }
+
+                if(atomNum2>=0 && 3*atomNum2<constrJac.columns()){
+                    constrJac.set(constrNum, 3*atomNum2+dim, 2*coord2[dim]-2*coord1[dim]);
+
+                    recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum2+dim, 2);
+                    if(atomNum1>=0 && 3*atomNum1<constrJac.columns())//atomNum1 free to move
+                        recordJacDeriv(constrNum, 3*atomNum2+dim, 3*atomNum1+dim, -2);
+                }
             }
         }
     }
@@ -540,6 +642,13 @@ public class BBFreeBlock implements Serializable, DOFBlock {
         //(since C' coords are a linear function of this CA and next N, CA coords)
         //(For this purpose we constrain not the actual C' but its projection into the 
         //CA-N-C plane)
+        
+        if(useDistSqrt && atomNumN>=0){
+            //non-sqrt constr is linear for the first res, so just use that
+            makeNCACConstrJacSqrt(constrJac,constrNum,NCoord,CACoord,NCoordNext,
+                    CACoordNext,atomNumN,pepPlaneNum);
+            return;
+        }
         
         //we'll need expansion coefficients for C'...
         double[] expansionCoeffs = pepPlanes[pepPlaneNum].getProjCAtomCoeffs();
@@ -588,9 +697,80 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     }
     
     
+    private void makeNCACConstrJacSqrt( DoubleMatrix2D constrJac, int constrNum,
+            double NCoord[], double CACoord[], double NCoordNext[], double CACoordNext[],
+            int atomNumN, int pepPlaneNum ){
+        //This version just constrains the N-C' distance
+         //given fixed geometry of each peptide plane,
+         //this is equivalent to the other NCAC constr
+         //this function assumes all four atoms except maybe last CA are free to move
+         //(otherwise dot product constraint becomes linear and we can just use that)
+        
+        //we'll need expansion coefficients for C'...
+        double[] expansionCoeffs = pepPlanes[pepPlaneNum].getProjCAtomCoeffs();
+        double a = expansionCoeffs[0];
+        double b = expansionCoeffs[1];
+        double c = expansionCoeffs[2];
+        
+        //calculated project C' coordinates
+        double CCoord[] = new double[3];
+        for(int dim=0; dim<3; dim++)
+            CCoord[dim] = a*CACoord[dim] + b*NCoordNext[dim] + c*CACoordNext[dim];
+        
+        
+        double dist = VectorAlgebra.distance(NCoord, CCoord);
+        for(int dim=0; dim<3; dim++){
+            
+            double diff = NCoord[dim] - CCoord[dim];
+            constrJac.set(constrNum, 3*atomNumN+dim, diff/dist );
+
+            for(int dim2=0; dim2<3; dim2++){
+                double secondDeriv = -diff*(NCoord[dim2]-CCoord[dim2]) / (dist*dist*dist);
+                if(dim==dim2)
+                    secondDeriv += 1/dist;
+                recordJacDeriv(constrNum, 3*atomNumN+dim, 3*atomNumN+dim2, secondDeriv);
+
+                //second derivatives wrt peptide plane atoms (which determine C' coord)
+                //d(dr/dx)/dy = d(dr/dx)/dC' dC'/dy
+                recordJacDeriv(constrNum, 3*atomNumN+dim, 3*atomNumN+3+dim2, -a*secondDeriv);
+                recordJacDeriv(constrNum, 3*atomNumN+dim, 3*atomNumN+6+dim2, -b*secondDeriv);
+                if(3*atomNumN+9<constrJac.columns())//atomNum2 free to move
+                    recordJacDeriv(constrNum, 3*atomNumN+dim, 3*atomNumN+9+dim2, -c*secondDeriv);
+            }
+            
+            
+            for(int pepAtomNum=0; pepAtomNum<3; pepAtomNum++){//which atom of the peptide plane containing C'
+                int curAtomNum = atomNumN + pepAtomNum + 1;
+                if(3*curAtomNum<constrJac.columns()){
+                    diff = CCoord[dim]-NCoord[dim];
+                    constrJac.set(constrNum, 3*curAtomNum+dim, expansionCoeffs[pepAtomNum]*diff/dist );
+
+                    for(int dim2=0; dim2<3; dim2++){
+                        double secondDeriv = -diff*(CCoord[dim2]-NCoord[dim2]) / (dist*dist*dist);//this is d^2r/dC'_dim dC'_dim2
+                        if(dim==dim2)
+                            secondDeriv += 1/dist;
+                        
+                        //for peptide plane atoms A and A2, d^2 r/dA_dim dA2_dim2 = d^2 r/dC'_dim dC'_dim2 dC'_dim dA_dim/dC'_dim dA2_dim2/dC'_dim2
+                        for(int pepAt2=0; pepAt2<3; pepAt2++){
+                            int atNum2=atomNumN+pepAt2+1;
+                            if(3*atNum2<constrJac.columns()){
+                                recordJacDeriv(constrNum, 3*curAtomNum+dim, 3*atNum2+dim2, expansionCoeffs[pepAtomNum]*expansionCoeffs[pepAt2]*secondDeriv);
+                            }
+                        }
+                            
+                        //also do second deriv with N coordinate
+                        recordJacDeriv(constrNum, 3*curAtomNum+dim, 3*atomNumN+dim2, -expansionCoeffs[pepAtomNum]*secondDeriv);
+                    }
+                }
+            }
+        }
+    }
+    
+    
     private void makeLastNCACCConstrJac( DoubleMatrix2D constrJac, int constrNum,
             double CACoord[], double CCoord[], int atomNumN ){ 
         //Last constraint is simpler, because CA and C' are both fixed
+        //Do this even with sqrt because linear constraint can be handled exactly!
         
         for(int dim=0; dim<3; dim++)
             constrJac.set(constrNum, 3*atomNumN+dim, CCoord[dim] - CACoord[dim]);
@@ -599,50 +779,92 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     }
     
     
-    public void setDOFs(DoubleMatrix1D x){
-        //x: free DOFs (relative to center, so can eval polys directly)
-        
+    void applyNCACoords(double[] fullDOFVals){
+        //place the N and CA atoms as indicated by the full DOF vals
         int numRes = residues.size();
-        
-        int numDOFsFull = fullDOFPolys.length;
-        double fullDOFVals[] = new double[fullDOFPolys.length];
-        
-        for(int fullDOF=0; fullDOF<numDOFsFull; fullDOF++)
-            fullDOFVals[fullDOF] = SeriesFitter.evalSeries(fullDOFPolys[fullDOF], x, x.size(), true, polyOrder);
-                    
-        //record current information needed for placement of sidechain
-        double genChi1[] = new double[numRes];
-        double SCTranslations[][] = new double[numRes][3];
-        
-        //now set each residue in the right place
-        
-        //start with the CA's and N's
         for(int resNum=0; resNum<numRes; resNum++){
             
             Residue curRes = residues.get(resNum);
-            
-            //the sidechain will be translated based on CA motion
-            if(resNum>0 && resNum<numRes-1){//CA moves, so translate sidechain with it
-                double curCACoords[] = curRes.getCoordsByAtomName("CA");
-                for(int dim=0; dim<3; dim++)
-                    SCTranslations[resNum][dim] = fullDOFVals[6*(resNum-1)+3+dim] - curCACoords[dim];
-            }
-            
-            genChi1[resNum] = GenChi1Calc.getGenChi1(curRes);
-            
-            //OK now place the backbone...
-            if(resNum>0){//N or CA moves
+            int NFreeIndex = fixAnchors ? 2*(resNum-1) : 2*resNum-1;//index of N among free atoms
+
+            if(resNum>0 || !fixAnchors){//N or CA moves
                 int CAIndex = curRes.getAtomIndexByName("CA");
                 int NIndex = curRes.getAtomIndexByName("N");
 
                 for(int dim=0; dim<3; dim++){
-                    if(resNum<numRes-1)//CA moves
-                        curRes.coords[3*CAIndex+dim] = fullDOFVals[6*(resNum-1)+3+dim];
+                    if( resNum<numRes-1 || !fixAnchors )//CA moves
+                        curRes.coords[3*CAIndex+dim] = fullDOFVals[3*NFreeIndex+3+dim];
                     
-                    curRes.coords[3*NIndex+dim] = fullDOFVals[6*(resNum-1)+dim];
+                    if(resNum>0)//N moves (non-fixed anchor case)
+                        curRes.coords[3*NIndex+dim] = fullDOFVals[3*NFreeIndex+dim];
                 }
             }
         }
+    }
+    
+    
+    double[] recordNCACoords(){
+        //record the full DOF vals indicated by the current conformation
+        int numRes = residues.size();
+        double[] fullDOFVals = new double[numFullDOFs];
+        for(int resNum=0; resNum<numRes; resNum++){
+            
+            Residue curRes = residues.get(resNum);
+            int NFreeIndex = fixAnchors ? 2*(resNum-1) : 2*resNum-1;//index of N among free atoms
+
+            if(resNum>0 || !fixAnchors){//N or CA moves
+                int CAIndex = curRes.getAtomIndexByName("CA");
+                int NIndex = curRes.getAtomIndexByName("N");
+
+                for(int dim=0; dim<3; dim++){
+                    if( resNum<numRes-1 || !fixAnchors )//CA moves
+                        fullDOFVals[3*NFreeIndex+3+dim] = curRes.coords[3*CAIndex+dim];
+                    
+                    if(resNum>0)//N moves (non-fixed anchor case)
+                        fullDOFVals[3*NFreeIndex+dim] = curRes.coords[3*NIndex+dim];
+                }
+            }
+        }
+        return fullDOFVals;
+    }
+    
+    
+    
+    public boolean setDOFs(DoubleMatrix1D x){
+        //x: free DOFs (relative to center, so can eval polys directly)
+        
+        int numRes = residues.size();
+        
+        double fullDOFVals[] = computeFullDOFValues(x);
+        
+        if(fullDOFVals==null)//DEBUG!!! failed
+            return false;
+                    
+        //record current information needed for placement of sidechain
+        double genChi1[] = new double[numRes];
+        //double genChi1SinCos[][] = new double[numRes][];//thought it would help, doesn't
+        //turns out acos looks really expensive with sampled profiling, not with instrumented
+        
+        double SCTranslations[][] = new double[numRes][3];
+        for(int resNum=0; resNum<numRes; resNum++){
+            
+            Residue curRes = residues.get(resNum);
+            int NFreeIndex = fixAnchors ? 2*(resNum-1) : 2*resNum-1;//index of N among free atoms
+            
+            //the sidechain will be translated based on CA motion
+            if( (resNum>0 && resNum<numRes-1) || !fixAnchors ){//CA moves, so translate sidechain with it
+                double curCACoords[] = curRes.getCoordsByAtomName("CA");
+                for(int dim=0; dim<3; dim++)
+                    SCTranslations[resNum][dim] = fullDOFVals[3*NFreeIndex+3+dim] - curCACoords[dim];
+            }
+            
+            genChi1[resNum] = GenChi1Calc.getGenChi1(curRes);
+            //genChi1SinCos[resNum] = GenChi1Calc.getGenChi1SinCos(curRes);
+        }
+        
+        //OK now place the backbone
+        
+        applyNCACoords(fullDOFVals);
         
         //OK now that the CA's and N's are in place, we can finish each peptide plane
         for(int pepPlaneNum=0; pepPlaneNum<numRes-1; pepPlaneNum++){
@@ -670,9 +892,11 @@ public class BBFreeBlock implements Serializable, DOFBlock {
             SidechainIdealizer.idealizeSidechain(residues.get(resNum));
             //and get gen chi1 to where it was before, so this BB motion commutes w/ sidechain dihedral changes
             GenChi1Calc.setGenChi1(residues.get(resNum), genChi1[resNum]);
+            //GenChi1Calc.setGenChi1SinCos(residues.get(resNum), genChi1SinCos[resNum]);
         }
         
         curFreeDOFVals = x.toArray();
+        return true;
     }
     
     
@@ -689,7 +913,505 @@ public class BBFreeBlock implements Serializable, DOFBlock {
     }
     
     
+    static DoubleMatrix1D toDM1D(ArrayList<Double> b){
+        double[] arr = b.stream().mapToDouble(Double::doubleValue).toArray();
+        return DoubleFactory1D.dense.make(arr);
+    }
     
+    static DoubleMatrix1D concat(DoubleMatrix1D a, ArrayList<Double> b){
+        DoubleMatrix1D[] parts = new DoubleMatrix1D[] {a, toDM1D(b)};
+        return DoubleFactory1D.dense.make(parts);
+    }
+    
+    
+    //DEBUG!!!!
+    ArrayList<Double> getConstrVals(double fullDOFVals[]){
+        double[] backupFullDOFVals = recordNCACoords();
+        applyNCACoords(fullDOFVals);
+        //calculate constraints & their jac
+        ArrayList<Double> constrVals = new VoxelSeriesChecker(residues,numFreeDOFs,numFullDOFs,
+            fullDOFPolys, pepPlanes, freeDOFMatrix, freeDOFCenter, fixAnchors, useDistSqrt).targetConstraintVals;
+        applyNCACoords(backupFullDOFVals);
+        return constrVals;
+    }
+    
+    DoubleMatrix2D getConstrJac(double fullDOFVals[]){
+        //this version evaluates the Jacobian at fullDOFVals rather than current coords
+        double[] backupFullDOFVals = recordNCACoords();
+        applyNCACoords(fullDOFVals);
+        //calculate constraints & their jac
+        DoubleMatrix2D constrJac = getConstrJac();
+        applyNCACoords(backupFullDOFVals);
+        return constrJac;
+    }
+    
+    ArrayList<Double> getConstrVals(double y[], DoubleMatrix1D changeDir, double coeff){
+        //get ConstrVals for y + coeff*changeDir
+        double fullDOFVals[] = y.clone();
+        for(int a=0; a<y.length; a++)
+            fullDOFVals[a] += coeff*changeDir.get(a);
+        return getConstrVals(fullDOFVals);
+    }
+    
+    
+    double getConstrValsResid(double y[], DoubleMatrix1D changeDir, double coeff){
+        ArrayList<Double> constrVals = getConstrVals(y,changeDir,coeff);
+        double resid = 0;
+        for(int d=0; d<constrVals.size(); d++){
+            double dev = constrVals.get(d) - targetConstrVals.get(d);
+            resid += dev*dev/numFullDOFs;//to match normalization used in computeFullDOFValues
+        }
+        return resid;
+    }
+    
+    
+    void numCheckConstrJac(DoubleMatrix2D constrJac, double fullDOFVals[]){
+        DoubleMatrix2D jacCheck = constrJac.like();
+        double step = 1e-6;
+        for(int fullDOF=0; fullDOF<numFullDOFs; fullDOF++){
+            DoubleMatrix1D changeDir = DoubleFactory1D.dense.make(numFullDOFs);
+            changeDir.set(fullDOF, step);
+            DoubleMatrix1D constrValUp = toDM1D(getConstrVals(fullDOFVals,changeDir,1));
+            DoubleMatrix1D constrValDown = toDM1D(getConstrVals(fullDOFVals,changeDir,-1));
+            constrValUp.assign(constrValDown,Functions.minus).assign(Functions.mult(0.5/step));
+            jacCheck.viewColumn(fullDOF).assign(constrValUp);
+        }
+        double diff = Algebra.DEFAULT.normF( jacCheck.copy().assign(constrJac,Functions.minus) );
+        int aaa = 0;//DEBUG!!
+    }
+    
+    
+    static double meanSquareDiff(ArrayList<Double> a, ArrayList<Double> b){
+        double ans = 0;
+        double n = a.size();
+        if(n!=b.size())
+            throw new RuntimeException("ERROR: List size mismatch");
+        for(int j=0; j<n; j++){
+            double dev = a.get(j)-b.get(j);
+            ans += dev*dev;
+        }
+        return ans / n;
+    }
+    
+    ///DEBUG!!!!  this is to avoid singularities
+    boolean useSingularityDetector = true;
+    
+    private double[] computeFullDOFValues(DoubleMatrix1D freeDOFVals){
+        //Compute full DOF values (N, CA coords) as a function of the free DOFs
+        int numDOFsFull = fullDOFPolys.length;
+        double[] fullDOFVals = new double[numDOFsFull];
+        
+        if(tooBigForSeries){
+            //since we're not sure about series quality, we will check constraint satisfaction
+            //and if needed, break up the journey from the origin (where series is initially centered) to freeDOFVals into steps
+            //at each of which the series is recalculated
+            
+            
+            //back up the initial polynomial so we can use it again later
+            double[] backupFullDOFCenter = fullDOFCenter;
+            double[][] backupFullDOFPolys = fullDOFPolys;
+            
+            
+            double targetResid = 1e-4;
+            //target residual in constr & free DOF values
+            //between what we want and what our calculated full DOF values imply
+            
+            //for intermediate values x=((1-a)*freeDOFCenter + a*freeDOFVals), we demand resid<a*targetResid
+            //progress is the current value of a
+            double progress = 0;
+            //DoubleMatrix1D x = DoubleFactory1D.dense.make(numFreeDOFs);//where we currently are in free DOF space (and where current series is centered)
+            //since initial series is centered at freeDOFCenter, we effectively start there
+            //we'll takes steps step*progressDir
+            double step = 1;
+            
+            int numStepsToGo = 1;//number of steps to reach freeDOFVals from freeDOFCenter
+            
+            while(numStepsToGo>0){
+                
+                //attempt to make the step
+               // DoubleMatrix1D curTarget = freeDOFVals.copy().assign(Functions.mult(progress+step));
+                DoubleMatrix1D stepVector = freeDOFVals.copy().assign(Functions.mult(step));//(current target)-(current series center)
+                for(int fullDOF=0; fullDOF<numDOFsFull; fullDOF++)
+                    fullDOFVals[fullDOF] = SeriesFitter.evalSeries(fullDOFPolys[fullDOF], stepVector, numFreeDOFs, true, polyOrder);
+
+                double resid = meanSquareDiff(getConstrVals(fullDOFVals),targetConstrVals);
+                if( resid > (progress+step)*targetResid ){
+                    //not good enough...need smaller steps
+                    step /= 2;
+                    numStepsToGo *= 2;
+                    
+                    if(numStepsToGo>10 && useSingularityDetector){//DEBUG!!! singularity likely
+                        fullDOFCenter = backupFullDOFCenter;
+                        fullDOFPolys = backupFullDOFPolys;
+                        return null;
+                    }
+                }
+                else {
+                    //step was successful
+                    progress += step;
+                    //x = curTarget;
+                    numStepsToGo--;
+                    
+                    //if not yet at freeDOFVals then prepare series centered at x to get us closer
+                    if(numStepsToGo>0){
+                        fullDOFCenter = fullDOFVals.clone();
+                        DoubleMatrix2D J = DoubleFactory2D.dense.compose(
+                            new DoubleMatrix2D[][] { new DoubleMatrix2D[] {freeDOFMatrix},//doesn't change, neither does freeDOFCenter (together they define free DOFs)
+                                new DoubleMatrix2D[] {getConstrJac(fullDOFVals)}
+                            } );
+                        makeTaylorSeries(J);//this will create fullDOFPolys
+                        
+                        
+                        //DEBUG!!!!
+                        //System.out.println("DET J: "+Algebra.DEFAULT.det(J));
+                        //detects if we cross a singularity
+                        //in general, if we do, then step size tanks (reasonable, and we don't need to model such cases).  
+                    }
+                }
+            }
+            
+            //revert to original polynomial for use next time
+            //this gets us to a starting point wiht exactly right constraints
+            //which is important for long-term stability
+            fullDOFCenter = backupFullDOFCenter;
+            fullDOFPolys = backupFullDOFPolys;
+        }
+        else {
+            for(int fullDOF=0; fullDOF<numDOFsFull; fullDOF++)
+                fullDOFVals[fullDOF] = SeriesFitter.evalSeries(fullDOFPolys[fullDOF], freeDOFVals, freeDOFVals.size(), true, polyOrder);
+        }
+        
+        return fullDOFVals;
+    }
+    
+    
+    
+    private double[] computeFullDOFValuesOld(DoubleMatrix1D freeDOFVals){
+        //Compute full DOF values (N, CA coords) as a function of the free DOFs
+        int numDOFsFull = fullDOFPolys.length;
+        double[] fullDOFVals = new double[numDOFsFull];
+        
+        for(int fullDOF=0; fullDOF<numDOFsFull; fullDOF++)
+            fullDOFVals[fullDOF] = SeriesFitter.evalSeries(fullDOFPolys[fullDOF], freeDOFVals, freeDOFVals.size(), true, polyOrder);
+        
+        if(tooBigForSeries){
+            //Let's refine with a linear expansion
+            //centered at the new x vals
+            
+            double targetResid = 1e-4;
+            //target residual in constr & free DOF values
+            //between what we want and what our calculated full DOF values imply
+            
+            while(true){
+                //OK to evaluate constraints and their derivatives
+                //we will temporarily set the N's and CA's, set them back later
+                double[] backupFullDOFVals = recordNCACoords();
+                applyNCACoords(fullDOFVals);
+                //calculate constraints & their jac
+                ArrayList<Double> constrVals = new VoxelSeriesChecker(residues,numFreeDOFs,numFullDOFs,
+                    fullDOFPolys, pepPlanes, freeDOFMatrix, freeDOFCenter, fixAnchors, useDistSqrt).targetConstraintVals;
+                DoubleMatrix2D constrJac = getConstrJac();      
+                applyNCACoords(backupFullDOFVals);//set coords back
+
+                numCheckConstrJac(constrJac,fullDOFVals);//DEBUG!!
+                
+
+                //calculate all the transformed vals (free and constr).  Call this x
+
+                DoubleMatrix1D xfree = Algebra.DEFAULT.mult(freeDOFMatrix, 
+                        DoubleFactory1D.dense.make(fullDOFVals));
+                xfree.assign(freeDOFCenter, Functions.minus);
+                DoubleMatrix1D x = concat(xfree,constrVals);
+
+            //DEBUG!!!!!!
+            //freeDOFCoeffs = selectLocalizableCoeffs(constrJac,freeDOFCoeffs);
+
+                DoubleMatrix2D J = DoubleFactory2D.dense.compose(
+                    new DoubleMatrix2D[][] { new DoubleMatrix2D[] {freeDOFMatrix},
+                        new DoubleMatrix2D[] {constrJac}
+                    } );
+
+
+                //current full DOF vals imply a set of free coords and constraint vals
+                //we can center our series there
+
+                DoubleMatrix1D desiredTransformedVals = concat(freeDOFVals, targetConstrVals);
+                //dx = desired remaining change in transformed coords
+                DoubleMatrix1D dx = desiredTransformedVals.copy().assign(x, Functions.minus);
+                DoubleMatrix2D Jinv = Algebra.DEFAULT.inverse(J);
+
+                
+                
+                DoubleMatrix1D dy = Algebra.DEFAULT.mult(Jinv, dx);//update to full DOF vals
+                
+                //DEBUG!!!
+                double resid0 = getConstrValsResid(fullDOFVals, dy, 0);//should match dx
+                double resid1 = getConstrValsResid(fullDOFVals, dy, 1);
+                double residp1 = getConstrValsResid(fullDOFVals, dy, 0.1);
+                double residp01 = getConstrValsResid(fullDOFVals, dy, 0.01);
+                double residp001 = getConstrValsResid(fullDOFVals, dy, 0.001);
+
+                
+                for(int fullDOF=0; fullDOF<numDOFsFull; fullDOF++)
+                    fullDOFVals[fullDOF] += dy.get(fullDOF);
+                
+                double resid = Algebra.DEFAULT.norm2(dx) / numFullDOFs;
+                if(resid <= targetResid)
+                    break;
+            }
+        }
+        
+        return fullDOFVals;
+    }
+    
+    
+    DoubleMatrix2D resPoseBasis(int resNum){
+        //basis for the pose of the residue (as column vectors in full-DOF space)
+        //basis can be redundant.
+        //CAN THIS ALSO BE DONE AT OTHER CENTERS TO GET APPROPRIATE BOUNDS?
+        //RESULTING DOFS WILL AT LEAST BE ORTH TO CONSTRAINTS WHEN RESTRICTED TO OUR RES' BASIS
+        //REGARDLESS OF POSE AT OTHER RES
+        
+        int atomNumN = fixAnchors ? 2*(resNum-1) : 2*resNum-1;
+        DoubleMatrix2D ans;
+        
+        if(resNum>0 && resNum<residues.size()-1){//N, CA, C' all moveable
+            ans = DoubleFactory2D.dense.make(numFullDOFs,9);
+            double CCoeffs[] = pepPlanes[resNum].getProjCAtomCoeffs();
+            
+            for(int dim=0; dim<3; dim++){
+                ans.set(3*atomNumN+dim, dim, 1);//N
+                ans.set(3*atomNumN+3+dim, dim+3, 1);//CA
+                for(int at=0; at<3; at++){//C'
+                    int pAtomOffset = 3*atomNumN+3*(at+1);
+                    if(pAtomOffset < numFullDOFs)
+                        ans.set(pAtomOffset+dim, dim+6, CCoeffs[at]);
+                }
+            }
+        }
+        else if(resNum==0){//first residue, no N and maybe no CA
+            //we do C' and O.  This scheme ensures enough DOFs to describe CB and thus sidechain motion
+            int basisSize = fixAnchors ? 6 : 9;
+            ans = DoubleFactory2D.dense.make(numFullDOFs,basisSize);
+            double CCoeffs[] = pepPlanes[resNum].getProjCAtomCoeffs();
+            double OCoeffs[] = pepPlanes[resNum].getProjOAtomCoeffs();
+            for(int dim=0; dim<3; dim++){
+                for(int at=0; at<3; at++){
+                    int pAtomOffset = 3*atomNumN+3*(at+1);
+                    if(pAtomOffset < numFullDOFs){
+                        ans.set(pAtomOffset+dim, dim, CCoeffs[at]);//C'
+                        ans.set(pAtomOffset+dim, dim+3, OCoeffs[at]);//O
+                    }
+                }
+                if(!fixAnchors)
+                    ans.set(3*atomNumN+3+dim, dim+6, 1);//CA
+            }
+        }
+        else {//last residue, only N, H and maybe CA
+            int basisSize = fixAnchors ? 6 : 9;
+            ans = DoubleFactory2D.dense.make(numFullDOFs,basisSize);
+            double HCoeffs[] = pepPlanes[resNum-1].getProjHAtomCoeffs();
+            for(int dim=0; dim<3; dim++){
+                ans.set(3*atomNumN+dim, dim, 1);//N
+                for(int at=0; at<3; at++){
+                    int pAtomOffset = 3*atomNumN+3*(at-1);
+                    if(pAtomOffset < numFullDOFs){
+                        ans.set(pAtomOffset+dim, dim+3, HCoeffs[at]);//H
+                    }
+                }
+                if(!fixAnchors)
+                    ans.set(3*atomNumN+3+dim, dim+6, 1);//CA
+            }
+        }
+        
+        return ans;
+    }
+    
+    
+    public DoubleMatrix2D selectResFreeDOFVectors(int resNum){
+        //return a set of 6 (column) vectors in free-DOF space that determine,
+        //as much as possible, the conf of the specified residue
+        DoubleMatrix2D fullVec = Algebra.DEFAULT.transpose(selectResFullDOFVectors(resNum));
+        return Algebra.DEFAULT.mult(freeDOFMatrix, fullVec);
+    }
+    
+    public DoubleMatrix2D selectResFullDOFVectors(int resNum){
+        //return a set of 6 (row) vectors in full-DOF space that determine,
+        //as much as possible, the conf of the specified residue
+        
+        //collect constrJac (at central conf): needed to get info on how to localize coeffs
+        DoubleMatrix2D constrJac = getConstrJac(fullDOFCenter);
+        
+        //So the space of motions of the N, CA, and C' (and thus CB too) of our residue has rank 6
+        //Project each coord of these atoms into the space we are selecting 
+        DoubleMatrix2D poseBasis = resPoseBasis(resNum);//full pose basis (as column vectors)
+        
+        DoubleMatrix2D curSpace = constrJac;//space to orthogonalize to
+        int numConstr = curSpace.rows();
+        for(int b=0; b<poseBasis.columns(); b++){//iterate through basis of space we want to represent
+            DoubleMatrix2D curMz = getOrthogVectors(curSpace);
+            DoubleMatrix2D newLocalizedDOF = DoubleFactory2D.dense.make(1,numFullDOFs);
+            for(int freeDOF=0; freeDOF<curMz.columns(); freeDOF++){
+                double elem = curMz.viewColumn(freeDOF).zDotProduct(poseBasis.viewColumn(b));
+                newLocalizedDOF.viewRow(0).assign( curMz.viewColumn(freeDOF), Functions.plusMult(elem) );
+            }
+            
+            if( Algebra.DEFAULT.normF(newLocalizedDOF) > 1e-10){//Not redundant with other localized DOFs
+                newLocalizedDOF.assign(Functions.mult(1./Algebra.DEFAULT.normF(newLocalizedDOF)));
+                curSpace = DoubleFactory2D.dense.appendRows(curSpace, newLocalizedDOF);
+            }
+        }
+                
+        int numLocalizedDOFs;
+        if( fixAnchors && (resNum==0||resNum==residues.size()-1) )
+            numLocalizedDOFs = 5;
+        else
+            numLocalizedDOFs = 6;
+        
+        if( curSpace.rows() != numConstr+numLocalizedDOFs ){
+            throw new RuntimeException("ERROR: Expected "+numLocalizedDOFs+" localized DOFs for res, got "
+                    +(curSpace.rows()-numConstr));
+            //generally there will be 6, but if anchors fixed then first & last res will have five
+        }
+        
+        DoubleMatrix2D resDOFs = curSpace.viewPart(numConstr, 0, numLocalizedDOFs, numFullDOFs);//given as rows here...
+        
+        //DEBUG!!!
+        /*double checkO = Algebra.DEFAULT.normF(Algebra.DEFAULT.mult(constrJac,Algebra.DEFAULT.transpose(resDOFs)));
+        DoubleMatrix2D shouldBeDiag = Algebra.DEFAULT.mult(resDOFs,Algebra.DEFAULT.transpose(resDOFs));
+        for(int i=0; i<numLocalizedDOFs; i++)
+            shouldBeDiag.set(i, i, shouldBeDiag.get(i,i)-1);
+        double checkON = Algebra.DEFAULT.normF(shouldBeDiag);*/
+        //DEBUG!!!
+        
+        return resDOFs;//given as rows here...
+        //and in full DOF space
+        /*DoubleMatrix2D newMz = curSpace.viewPart(numConstr, 0, numFreeDOFs, numFullDOFs);
+        newMz = Algebra.DEFAULT.transpose(newMz);
+        
+        //check newMz is orthonormal and orthogonal 
+        //DEBUG!!!
+        double checkO = Algebra.DEFAULT.normF(Algebra.DEFAULT.mult(constrJac,newMz));
+        DoubleMatrix2D shouldBeDiag = Algebra.DEFAULT.mult(Algebra.DEFAULT.transpose(newMz),newMz);
+        for(int i=0; i<numFreeDOFs; i++)
+            shouldBeDiag.set(i, i, 0);
+        double checkON = Algebra.DEFAULT.normF(shouldBeDiag);*/
+    }
+    
+    
+    
+    
+    
+    DoubleMatrix2D selectLocalizableCoeffs(DoubleMatrix2D constrJac, DoubleMatrix2D origMz){
+        //return a set of coefficients such that the first 6 determine,
+        //as much as possible, the conf of a particular residue
+        
+        //this particular function is more of a joke, focusing on a peptide plane rather than a res
+        //and also hard-coding what peptide plane it is
+        //selectResDOFs is the serious version
+        int targetRes = 2;
+        
+        //first attempt: try just projecting the full DOFs into free DOF space
+        //we want to see if we can localize to the 9 DOFs of a peptide plane
+        //and get good resid for those 9
+        //if so then our chosen free dofs are giving effective local control,
+        //try to go to 6 etc
+        int startFullDOF = 6*targetRes;//start at CA of target res,
+        //will do pep plane extending into next res
+        int endFullDOF = startFullDOF+9;//end of pep plane
+        
+        DoubleMatrix2D curSpace = constrJac;//space to orthogonalize to
+        int numConstr = curSpace.rows();
+        for(int targFullDOF=startFullDOF; targFullDOF<endFullDOF; targFullDOF++){
+            DoubleMatrix2D curMz = getOrthogVectors(curSpace);
+            DoubleMatrix2D newLocalizedDOF = DoubleFactory2D.dense.make(1,numFullDOFs);
+            for(int freeDOF=0; freeDOF<curMz.columns(); freeDOF++){
+                double elem = curMz.get(targFullDOF, freeDOF);
+                newLocalizedDOF.viewRow(0).assign( curMz.viewColumn(freeDOF), Functions.plusMult(elem) );
+            }
+            
+            if( Algebra.DEFAULT.normF(newLocalizedDOF) > 1e-10){//Not redundant with other localized DOFs
+                newLocalizedDOF.assign(Functions.mult(1./Algebra.DEFAULT.normF(newLocalizedDOF)));
+                curSpace = DoubleFactory2D.dense.appendRows(curSpace, newLocalizedDOF);
+            }
+        }
+                
+        
+        //OK now the other DOFs will simply fill in the space left by the localized and other DOFs
+        DoubleMatrix2D otherFreeDOFs = getOrthogVectors(curSpace);
+        curSpace = DoubleFactory2D.dense.compose(
+                new DoubleMatrix2D[][] { new DoubleMatrix2D[] {curSpace},
+                    new DoubleMatrix2D[] {Algebra.DEFAULT.transpose(otherFreeDOFs)},
+                } );
+        
+        
+        DoubleMatrix2D newMz = curSpace.viewPart(numConstr, 0, numFreeDOFs, numFullDOFs);
+        newMz = Algebra.DEFAULT.transpose(newMz);
+        
+        //check newMz is orthonormal and orthogonal 
+        //DEBUG!!!
+        double checkO = Algebra.DEFAULT.normF(Algebra.DEFAULT.mult(constrJac,newMz));
+        DoubleMatrix2D shouldBeDiag = Algebra.DEFAULT.mult(Algebra.DEFAULT.transpose(newMz),newMz);
+        for(int i=0; i<numFreeDOFs; i++)
+            shouldBeDiag.set(i, i, 0);
+        double checkON = Algebra.DEFAULT.normF(shouldBeDiag);
+        
+        
+        return newMz;
+    }
+    
+    
+    
+    DoubleMatrix2D selectLocalizableCoeffsOld(DoubleMatrix2D constrJac, DoubleMatrix2D origMz){
+        //return a set of coefficients such that the first 6 determine,
+        //as much as possible, the conf of a particular residue
+        int targetRes = 0;
+        
+        //first attempt: try just projecting the full DOFs into free DOF space
+        //we want to see if we can localize to the 9 DOFs of a peptide plane
+        //and get good resid for those 9
+        //if so then our chosen free dofs are giving effective local control,
+        //try to go to 6 etc
+        int startFullDOF = 6*targetRes;//start at CA of target res,
+        //will do pep plane extending into next res
+        int endFullDOF = startFullDOF+9;//end of pep plane
+        
+        DoubleMatrix2D localizedDOFs = DoubleFactory2D.dense.make(numFullDOFs,9);
+        for(int targFullDOF=startFullDOF; targFullDOF<endFullDOF; targFullDOF++){
+            for(int freeDOF=0; freeDOF<numFreeDOFs; freeDOF++){
+                double elem = origMz.get(targFullDOF, freeDOF);
+                localizedDOFs.viewColumn(targFullDOF).assign( origMz.viewColumn(freeDOF), 
+                        Functions.plusMult(elem) );
+            }
+        }
+       
+        
+        
+        //OK now the other DOFs will simply fill in the space left by the localized and other DOFs
+        DoubleMatrix2D augCJ = DoubleFactory2D.dense.compose(
+                new DoubleMatrix2D[][] { new DoubleMatrix2D[] {Algebra.DEFAULT.transpose(localizedDOFs)},
+                    new DoubleMatrix2D[] {constrJac}
+                } );
+        
+        DoubleMatrix2D otherFreeDOFs = getOrthogVectors(augCJ);
+        DoubleMatrix2D newMz = DoubleFactory2D.dense.compose(
+                new DoubleMatrix2D[][] { new DoubleMatrix2D[] {localizedDOFs, otherFreeDOFs} } );
+        
+        return newMz;
+        //also take a look to see how much the other full DOFs participate in other stuff
+        //other possible attempt: assume full control w/i free DOF space
+    }
+    
+    
+    public DoubleMatrix1D randomValsInVoxel(){
+        DoubleMatrix1D x = DoubleFactory1D.dense.make(numFreeDOFs);
+        for(int d=0; d<numFreeDOFs; d++){
+            double lb = freeDOFVoxel[0][d];
+            double val = lb + Math.random() * (freeDOFVoxel[1][d]-lb);
+            x.set(d, val);
+        }
+        return x;
+    }
 
     
     

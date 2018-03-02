@@ -9,6 +9,7 @@ import java.util.ArrayList;
 
 import edu.duke.cs.osprey.dof.DegreeOfFreedom;
 import edu.duke.cs.osprey.restypes.ResidueTemplate;
+import org.apache.commons.math3.optim.linear.LinearConstraint;
 
 /**
  *
@@ -30,6 +31,9 @@ public class RC implements Serializable {
     //note: for AA type we do not use DOFmin or DOFmax (can leave at 0 or whatever): use AAType instead
     
     
+    public ArrayList<LinearConstraint> linConstr = new ArrayList<>();//non-box linear constraints on the DOFs that are part of this RC definition
+    public int bbVoxNum = -1;//when linConstr are from a set, this identifies which set
+    
     public int RCIndex;//index within the RCs for this residue in the PositionConfSpace
 
     public RC(String AAType, ResidueTemplate template, int rotNum, ArrayList<DegreeOfFreedom> DOFs, ArrayList<Double> DOFmin, ArrayList<Double> DOFmax, int RCIndex) {
@@ -50,6 +54,7 @@ public class RC implements Serializable {
     	this.DOFmin = new ArrayList<>(other.DOFmin);
     	this.DOFmax = new ArrayList<>(other.DOFmax);
     	this.RCIndex = other.RCIndex;
+        this.linConstr = new ArrayList(other.linConstr);
     }
     
     

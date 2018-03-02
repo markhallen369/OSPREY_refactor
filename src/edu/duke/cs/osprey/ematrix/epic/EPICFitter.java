@@ -18,6 +18,7 @@ import cern.colt.matrix.DoubleMatrix2D;
 import cern.jet.math.Functions;
 import edu.duke.cs.osprey.minimization.MoleculeModifierAndScorer;
 import edu.duke.cs.osprey.minimization.ObjectiveFunction;
+import edu.duke.cs.osprey.plug.RCTuplePolytope;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -46,8 +47,14 @@ public class EPICFitter {
     
     static int sampPerParam = 10;
     
+    RCTuplePolytope tope;
+    
+    static boolean usePLUGForEPIC = false;//DEBUG!!!!
+
+    public static final boolean verbose = false;
+    
     public EPICFitter ( MoleculeModifierAndScorer mof, EPICSettings eset,
-            DoubleMatrix1D cen, double me ) {
+            DoubleMatrix1D cen, double me, RCTuplePolytope rtp) {
         //given the CCDMinimizer used to minimize for a rotamer pair (or intra+shell)
         //construct an EpicFitter for it
         
@@ -60,6 +67,10 @@ public class EPICFitter {
         es = eset;
         center = cen;
         minE = me;
+        tope = rtp;
+        
+        if(tope!=null && usePLUGForEPIC)
+            tope.checkDOFList(mof.getDOFs());
     }
 
     
@@ -76,7 +87,7 @@ public class EPICFitter {
 
         if(fp.PCOrder>fp.order){//need to do PC fit
 
-            PCFit = new EPolyPC(PCTemplate,fp.order,fp.PCOrder,fp.PCFac);
+            PCFit = new EPolyPC(PCTemplate,fp.order,fp.PCOrder,fp.PCFac,tope);
 
             int numPCs = SeriesFitter.countTrue(PCFit.isPC);
 
@@ -164,11 +175,13 @@ public class EPICFitter {
                 ySamp[s] = PCFit.toPCBasis(sampRel[s]);
 
             if(Double.isInfinite(fp.SAPECutoff)){//SAPE takes care of everything
-                System.out.println("No fit needed: SAPE is full energy");
+                if(verbose)
+                    System.out.println("No fit needed: SAPE is full energy");
                 PCFit.coeffs = new double[numParams];//all 0's for polynomial is best, anything else is noise
             }
             else if(allBelowCutoff){
-                System.out.println("Analytical:");
+                if(verbose)
+                    System.out.println("Analytical:");
                 PCFit.coeffs = SeriesFitter.fitSeries(ySamp,trueVal,weights,lambda,
                     false,PCFit.fullOrder,PCFit.PCOrder,PCFit.isPC,false,null,null);
             }
@@ -183,11 +196,13 @@ public class EPICFitter {
         else{
             
             if(Double.isInfinite(fp.SAPECutoff)){//SAPE takes care of everything
-                System.out.println("No fit needed: SAPE is full energy");
+                if(verbose)
+                    System.out.println("No fit needed: SAPE is full energy");
                 seriesCoeffs = new double[numParams];//all 0's for polynomial is best, anything else is noise
             }
             else if(allBelowCutoff){
-                System.out.println("Analytical:");
+                if(verbose)
+                    System.out.println("Analytical:");
                 seriesCoeffs = SeriesFitter.fitSeries(sampRel,trueVal,weights,lambda,
                         false,fp.order);
             }
@@ -197,7 +212,7 @@ public class EPICFitter {
             }
             
             ans = new EPoly(numDOFs, objFcn.getDOFs(), DOFmax, DOFmin, center,
-                    minE, seriesCoeffs, fp.order);
+                    minE, seriesCoeffs, fp.order, tope);
         }
         
         
@@ -355,7 +370,8 @@ public class EPICFitter {
         }
 
         meanResidual /= weightSum;//numSamples;
-        System.out.println("CV MEAN RESIDUAL:"+meanResidual);
+        if(verbose)
+            System.out.println("CV MEAN RESIDUAL:"+meanResidual);
         
         //Let's return the mean residual
         return meanResidual;
@@ -444,16 +460,55 @@ public class EPICFitter {
     void sampleFromVoxel(int s, DoubleMatrix1D[] sampRel, DoubleMatrix1D[] sampAbs, double[] trueVal,
             ObjectiveFunction of, double[] relMin, double[] relMax, GaussianLowEnergySampler gs){
         //sample from the voxel, using gs if not null, else uniformly
-        if(gs==null)
-            uniformVoxelSample(s,sampRel,sampAbs,trueVal,objFcn,relMin,relMax);
-        else
-            gaussianVoxelSample(s,sampRel,sampAbs,trueVal,objFcn,gs);
+        boolean repeat;
+        do {
+            repeat = false;
+            if(gs==null)
+                uniformVoxelSample(s,sampRel,sampAbs,trueVal,objFcn,relMin,relMax);
+            else
+                gaussianVoxelSample(s,sampRel,sampAbs,trueVal,objFcn,gs);
+            
+            if(tope!=null && usePLUGForEPIC){
+                repeat = ! tope.containsPoint(sampAbs[s].toArray());
+                
+                //DEBUG!!!
+                if(repeat){
+                    if(trueVal[s]>es.EPICThresh1)
+                        numAboveThreshOutsideTope++;
+                    else
+                        numBelowThreshOutsideTope++;
+                }
+                else {
+                    if(trueVal[s]>es.EPICThresh1)
+                        numAboveThreshInTope++;
+                    else
+                        numBelowThreshInTope++;
+                }
+                
+                
+            }
+            
+            
+            
+        } while(repeat);
     }
+    
+    
+    //DEBUG!!!  For seeing how well PLUG constr can substitute for imposing thresh
+    int numBelowThreshInTope, numAboveThreshInTope, numBelowThreshOutsideTope, numAboveThreshOutsideTope;
     
     
     void generateSamples(int numSamples,
             DoubleMatrix1D[] sampRel, DoubleMatrix1D[] sampAbs, double[] trueVal, int maxOverCutoff){
 
+        
+        
+        numBelowThreshInTope=0;
+        numAboveThreshInTope=0;
+        numBelowThreshOutsideTope=0;
+        numAboveThreshOutsideTope=0;
+        
+        
         //Generate samples relative to startVec (sampRel) and absolute (sampAbs)
         //and give their energies (trueVal), relative to baseE
         //we'll allow at most maxOverCutoff samples above es.EPICThresh1
@@ -499,7 +554,18 @@ public class EPICFitter {
             }
         }
         
-        System.out.println("Drew "+numSamples+" samples of which "+countOverCutoff+" are over bCutoff");
+        if(verbose){
+            System.out.println("Drew "+numSamples+" samples of which "+countOverCutoff+" are over bCutoff");
+        
+        
+        
+            System.out.println("numBelowThreshInTope: "+numBelowThreshInTope);
+            System.out.println("numAboveThreshInTope: "+numAboveThreshInTope);
+            System.out.println("numBelowThreshOutsideTope: "+numBelowThreshOutsideTope);
+            System.out.println("numAboveThreshOutsideTope: "+numAboveThreshOutsideTope);
+        }
+        
+        
     }
 
     
@@ -673,7 +739,7 @@ public class EPICFitter {
     public EPoly blank(){
         //return a EPoly on no continuous degrees of freedom
         EPoly ans = new EPoly(numDOFs, objFcn.getDOFs(), DOFmax, DOFmin, center,
-                minE, null, 2);
+                minE, null, 2, tope);
         //arbitrarily calling it quadratic (doesn't matter since no variables in polynomial)
         ans.fitDescription = "No DOFs";
         return ans;

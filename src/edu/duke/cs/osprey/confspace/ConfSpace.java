@@ -12,7 +12,9 @@ import java.util.List;
 
 import cern.colt.matrix.DoubleFactory1D;
 import cern.colt.matrix.DoubleMatrix1D;
+import com.joptimizer.functions.LinearMultivariateRealFunction;
 import edu.duke.cs.osprey.bbfree.BBFreeBlock;
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import edu.duke.cs.osprey.control.EnvironmentVars;
 import edu.duke.cs.osprey.dof.DegreeOfFreedom;
 import edu.duke.cs.osprey.dof.FreeDihedral;
@@ -29,13 +31,19 @@ import edu.duke.cs.osprey.kstar.KSTermini;
 import edu.duke.cs.osprey.minimization.CCDMinimizer;
 import edu.duke.cs.osprey.minimization.Minimizer;
 import edu.duke.cs.osprey.minimization.MoleculeModifierAndScorer;
+import edu.duke.cs.osprey.minimization.SQPMinimizer;
+import edu.duke.cs.osprey.plug.LPChecks;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 import edu.duke.cs.osprey.restypes.HardCodedResidueInfo;
 import edu.duke.cs.osprey.restypes.ResidueTemplate;
 import edu.duke.cs.osprey.structure.Molecule;
 import edu.duke.cs.osprey.structure.PDBFileReader;
 import edu.duke.cs.osprey.structure.PDBFileWriter;
 import edu.duke.cs.osprey.structure.Residue;
+import edu.duke.cs.osprey.tools.ObjectIO;
 import edu.duke.cs.osprey.tools.StringParsing;
+import org.apache.commons.math3.optim.linear.LinearConstraint;
+import org.apache.commons.math3.optim.linear.Relationship;
 
 /**
  *
@@ -98,7 +106,7 @@ public class ConfSpace implements Serializable {
      */
     public ConfSpace(String PDBFile, ArrayList<String> flexibleRes, ArrayList<ArrayList<String>> allowedAAs, 
             boolean addWT, ArrayList<String> wtRotOnlyRes, boolean contSCFlex, DEEPerSettings dset, ArrayList<String[]> moveableStrands, 
-            ArrayList<String[]> freeBBZones, boolean ellipses, boolean addWTRots, KSTermini termini){
+            CATSSettings catsSettings, boolean ellipses, boolean addWTRots, KSTermini termini){
     
     	useEllipses = ellipses;  	
     	this.flexibleRes = flexibleRes;
@@ -156,7 +164,7 @@ public class ConfSpace implements Serializable {
         ArrayList<Perturbation> perts = dset.makePerturbations(m);//will make pert block here
         confDOFs.addAll(perts);
         
-        ArrayList<BBFreeBlock> bfbList = getBBFreeBlocks(freeBBZones,flexibleRes);
+        ArrayList<BBFreeBlock> bfbList = getBBFreeBlocks(catsSettings,flexibleRes);
         for(BBFreeBlock bfb : bfbList)
             confDOFs.addAll( bfb.getDOFs() );
         
@@ -186,6 +194,11 @@ public class ConfSpace implements Serializable {
             
         }
         
+        
+        //finally number all the confDOFs to facilitate comparisons
+        for(int dofNum=0; dofNum<confDOFs.size(); dofNum++)
+            confDOFs.get(dofNum).confDOFNum = dofNum;
+        
         //DEBUG!!!
         /*PDBFileWriter.writePDBFile(m, "STRUCT1.pdb");
         perts.get(0).apply(5);
@@ -205,17 +218,20 @@ public class ConfSpace implements Serializable {
     	this.useEllipses = other.useEllipses;
     }
     
-    private ArrayList<BBFreeBlock> getBBFreeBlocks(ArrayList<String[]> freeBBZones, ArrayList<String> flexibleRes){
+    /*private ArrayList<BBFreeBlock> getBBFreeBlocks(CATSSettings catsSettings, ArrayList<String> flexibleRes){
         //create a BFB for each (start res, end res) pair.  PDB residue numbers provided.  
         ArrayList<BBFreeBlock> ans = new ArrayList<>();
         
-        for(String[] termini : freeBBZones){
+        for(String[] termini : catsSettings.freeBBZones){
             ArrayList<Residue> curBFBRes = resListFromTermini(termini, flexibleRes);
-            BBFreeBlock bfb = new BBFreeBlock(curBFBRes);
+            BBFreeBlock bfb = new BBFreeBlock(curBFBRes,true);
             ans.add(bfb);
         }
         
         return ans;
+    }*/
+    private ArrayList<BBFreeBlock> getBBFreeBlocks(CATSSettings catsSettings, ArrayList<String> flexibleRes){
+        return catsSettings.buildBBFreeBlocks(flexibleRes, m);
     }
     
     private BBFreeBlock getCurBFB(ArrayList<BBFreeBlock> bfbList, Residue res){
@@ -351,17 +367,33 @@ public class ConfSpace implements Serializable {
     
     
     public double minimizeEnergy(int[] conf, EnergyFunction efunc, String outputPDBFile){
+        //let's keep CCD default for now
+        return minimizeEnergy(conf, efunc, outputPDBFile, false);
+    }
+    
+    public double minimizeEnergy(int[] conf, EnergyFunction efunc, String outputPDBFile, boolean useSQP){
+        return minimizeEnergy(conf, efunc, efunc, outputPDBFile, useSQP);
+    }
+    
+    public double minimizeEnergy(int[] conf, EnergyFunction minEfunc, EnergyFunction evalEfunc, 
+            String outputPDBFile, boolean useSQP){
         //minimize the energy of a conformation, within the DOF bounds indicated by conf (a list of RCs)
         //return the minimized energy
         //if outputPDBFile isn't null, then output the minimized conformation to that file
+        //This version uses minEFunc to minimize and then evalEFunc to evaluate energy at the minimum
         
         RCTuple RCs = new RCTuple(conf);
-        MoleculeModifierAndScorer energy = new MoleculeModifierAndScorer(efunc,this,RCs);
+        MoleculeModifierAndScorer energyForMin = new MoleculeModifierAndScorer(minEfunc,this,RCs);
+        MoleculeModifierAndScorer energyForEval = new MoleculeModifierAndScorer(evalEfunc,this,RCs);
         
         DoubleMatrix1D optDOFVals;
         
-        if(energy.getNumDOFs()>0){//there are continuously flexible DOFs to minimize
-            Minimizer min = new CCDMinimizer(energy,false);
+        if(energyForMin.getNumDOFs()>0){//there are continuously flexible DOFs to minimize
+            Minimizer min;
+            if(useSQP)
+                min = new SQPMinimizer(energyForMin,null);//this function doesn't add additional linear constraints
+            else
+                min = new CCDMinimizer(energyForMin,false);
             //with the generic objective function interface we can easily include other minimizers though
 
             
@@ -385,13 +417,119 @@ public class ConfSpace implements Serializable {
         else//molecule is already in the right, rigid conformation
             optDOFVals = DoubleFactory1D.dense.make(0);
         
-        double minE = energy.getValue(optDOFVals);//this will put m into the minimized conformation
+        double minE = energyForEval.getValue(optDOFVals);//this will put m into the minimized conformation
+        
+        
+        
+        //DEBUG!!!!!
+        /*DoubleMatrix1D xEPIC = DoubleFactory1D.dense.make(new double[]
+        {-57.969192, 166.735048, -0.066281, -0.229844, 0.245356, -0.203498, 0.140798, -0.071649, -0.304984, -0.455166, -183.708158, 51, -58.074254, -64.066479, -79, -56.170042, 87.783936, 9, -68.044382, -69.201669, -31, -69.036891, 168.647869}
+        );
+        System.out.println("E at EPIC min: "+energy.getValue(xEPIC));
+        
+         DoubleMatrix1D xreg = DoubleFactory1D.dense.make(new double[]
+        {-57.916999, 166.69074, -0.062106, -0.232096, 0.23491, -0.201836, 0.147409, -0.074318, -0.293336, -0.455166, -183.76415, 51, -58.090563, -64.197299, -79, -56.228339, 87.764565, 9, -67.969832, -69.058391, -31, -69.092538, 168.669794}
+        );
+        System.out.println("E at reg min: "+energy.getValue(xreg));*/
+                
+        //DEBUG!!!!
+        
+        /*System.out.println("CCD opt DOF vals: "+optDOFVals);
+        System.out.println("CCD min E: "+minE);
+             
+                Minimizer min2 = new SQPMinimizer(energy,null);
+                Minimizer.Result sqpResult = min2.minimize();
+                System.out.println("SQP opt DOF vals: "+sqpResult.dofValues);
+                System.out.println("SQP min E: "+sqpResult.energy);
+
+        System.out.println("Here are the energies along the line segment from CCD min to SQP min: ");
+        int numSteps=20;
+        for(int step=0; step<=20; step++){
+            double stepFrac = step*1.0/numSteps;
+            DoubleMatrix1D x = optDOFVals.copy().assign(Functions.mult(1-stepFrac));
+            x.assign(sqpResult.dofValues, Functions.plusMult(stepFrac));
+            System.out.println(energy.getValue(x));
+        }
+        System.out.println("Line segment energies done.");*/
+                
+        //System.out.println("CCD opt vals in polytope :"+pmat.isPointFeasible(conf, optDOFVals, energy.getDOFs()));
+        //System.out.println("SQP opt vals in polytope :"+pmat.isPointFeasible(conf, sqpResult.dofValues, energy.getDOFs()));
+
+        
+        //DEBUG!!!!!!
+        /*DoubleMatrix1D x = optDOFVals.copy();
+        int numGridpts = 100;
+        int graphDims[] = new int[] {9,10};
+        double lb[] = new double[2];
+        double step[] = new double[2];
+        for(int a=0; a<2; a++){
+            lb[a] = energy.getConstraints()[0].get(graphDims[a]);
+            step[a] = ( energy.getConstraints()[1].get(graphDims[a]) - lb[a] ) / (numGridpts-1);
+        }
+        System.out.println("Graphing energy values in voxel wrt graphDims");
+        System.out.println("DOF values at minimum energy: "+optDOFVals.get(graphDims[0])+" "+optDOFVals.get(graphDims[1]));
+        System.out.println("Minimum energy: "+minE);
+        for(int g1=0; g1<numGridpts; g1++){
+            for(int g2=0; g2<numGridpts; g2++){
+                x.set(graphDims[0], lb[0]+step[0]*g1);
+                x.set(graphDims[1], lb[1]+step[1]*g2);
+                double E = energy.getValue(x);
+                System.out.println(x.get(graphDims[0])+" "+x.get(graphDims[1])+" "+E);
+            }
+        }
+        System.out.println("Done graphing.");*/
+        //DEBUG!!!
+        
         
         if(outputPDBFile!=null)
             PDBFileWriter.writePDBFile(m, outputPDBFile, minE);
         
         return minE;
     }
+    
+    
+    
+    public double minimizeEnergyWithPLUG(int[] conf, EnergyFunction efunc, String outputPDBFile, PolytopeMatrix pmat){
+        //minimize the energy of a conformation, within the DOF bounds indicated by conf (a list of RCs)
+        //return the minimized energy
+        //if outputPDBFile isn't null, then output the minimized conformation to that file
+        
+        //System.out.println("MINIMIZING ENERGY WITH PLUG");
+        
+        RCTuple RCs = new RCTuple(conf);
+        MoleculeModifierAndScorer energy = new MoleculeModifierAndScorer(efunc,this,RCs);
+             
+        ArrayList<LinearConstraint> constrList = pmat.getFullStericPolytope(RCs, energy.getDOFs());
+        
+        LinearMultivariateRealFunction constr[] = new LinearMultivariateRealFunction[constrList.size()];
+        for(int c=0; c<constrList.size(); c++){
+            constr[c] = LPChecks.toLinearMultivariateRealFunction(constrList.get(c));
+        }
+        
+        
+                Minimizer min2 = new SQPMinimizer(energy,constr);
+                Minimizer.Result sqpResult = min2.minimize();
+                //System.out.println("SQP opt DOF vals: "+sqpResult.dofValues);
+                //System.out.println("SQP min E: "+sqpResult.energy);
+
+        //System.out.println("SQP opt vals in polytope :"+pmat.isPointFeasible(conf, sqpResult.dofValues, energy.getDOFs()));
+                if(sqpResult==null){
+                    if(outputPDBFile!=null)
+                        System.out.println("Warning: No constraint-satisfying conformation found to put in "+outputPDBFile);
+                    return Double.POSITIVE_INFINITY;
+                }
+                
+                
+        
+        if(outputPDBFile!=null)
+            PDBFileWriter.writePDBFile(m, outputPDBFile, sqpResult.energy);
+        
+        //System.out.println("DONE MINIMIZING ENERGY WITH PLUG");
+        
+        return sqpResult.energy;
+    }
+    
+    
     
     
 	public MultiTermEnergyFunction getDecomposedMinimizedEnergy(int[] conf, EnergyFunction efunc, String outputPDBFile){
@@ -460,6 +598,15 @@ public class ConfSpace implements Serializable {
         ans.addAll(mutDOFs);
         ans.addAll(confDOFs);
         return ans;
+    }
+    
+    
+    public int getDesignIndex(Residue res){
+        for(int pos=0; pos<numPos; pos++){
+            if(posFlex.get(pos).res==res)
+                return pos;
+        }
+        return -1;
     }
     
     

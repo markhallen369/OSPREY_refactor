@@ -443,6 +443,13 @@ public class MoleculeModifierAndScorer implements ObjectiveFunction {
         }
         return fixableDOFs;
     }
+
+    public DoubleMatrix1D getCurDOFVals() {
+        return curDOFVals;
+    }
+    
+    
+    
     
     
 }

@@ -26,6 +26,8 @@ public class FreeDihedral extends DegreeOfFreedom {
     
     // temp space
     double[][] dihedralCoords;
+    
+    String name;
 
     public FreeDihedral(Residue res, int dihedralNum) {
     	
@@ -41,6 +43,8 @@ public class FreeDihedral extends DegreeOfFreedom {
         } else {
         	this.curVal = Double.NaN;
         }
+        
+        name = "DIH"+res.getPDBResNumber()+"."+dihedralNum;
     }
     
     public boolean isValid() {
@@ -134,4 +138,10 @@ public class FreeDihedral extends DegreeOfFreedom {
     public DOFBlock getBlock(){
         return null;
     }
+    
+        @Override
+    public String getName() {
+        return name;
+    }
+
 }

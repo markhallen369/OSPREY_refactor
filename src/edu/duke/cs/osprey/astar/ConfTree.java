@@ -537,7 +537,8 @@ public class ConfTree<T extends AStarNode> extends AStarTree<T> {
             //later can do MPLP, etc. here
         
         if(minPartialConfs || isFullyAssigned(node))
-            node.setScore(node.getScore() + epicMat.minContE(node.getNodeAssignments()));
+            node.setScore(epicMat.minimizeEnergy(new RCTuple(node.getNodeAssignments()),false,true,null,1));
+            //node.setScore(node.getScore() + epicMat.minContE(node.getNodeAssignments()));
         
         node.setScoreNeedsRefinement(false);
     }

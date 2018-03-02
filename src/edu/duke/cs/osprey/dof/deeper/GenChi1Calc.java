@@ -26,24 +26,39 @@ public class GenChi1Calc {
         if( res.template.name.equalsIgnoreCase("GLY") )
             return 0;
         else{
-            String lastAtom = getGenChi1LastAtom(res.template.name);
-            
-            double lastCoords[] = res.getCoordsByAtomName(lastAtom);
-            double NCoords[] = res.getCoordsByAtomName("N");
-            double CACoords[] = res.getCoordsByAtomName("CA");
-            double CBCoords[] = res.getCoordsByAtomName("CB");
-            
-            if(lastCoords==null || NCoords==null || CACoords==null | CBCoords==null){
-                //not a protein residue.  Doesn't have gen chi1
+            double dihCoords[][] = genChi1Coords(res);
+            if(dihCoords==null)
                 return Double.NaN;
-            }
-            
-            
-            //coordinates defining dihedral
-            double dihCoords[][] = new double[][] {NCoords,CACoords,CBCoords,lastCoords};
-            
-            return Protractor.measureDihedral(dihCoords);
+            else
+                return Protractor.measureDihedral(dihCoords);
         }
+    }
+    
+    public static double[] getGenChi1SinCos(Residue res){//Get sine and cosine
+        double dihCoords[][] = genChi1Coords(res);
+        if(dihCoords==null)
+            return null;
+        else
+            return Protractor.measureDihedralSinCos(dihCoords);
+    }
+    
+    
+    public static double[][] genChi1Coords(Residue res){
+        //the four atom coordinates defining generalized chi1
+        String lastAtom = getGenChi1LastAtom(res.template.name);
+            
+        double lastCoords[] = res.getCoordsByAtomName(lastAtom);
+        double NCoords[] = res.getCoordsByAtomName("N");
+        double CACoords[] = res.getCoordsByAtomName("CA");
+        double CBCoords[] = res.getCoordsByAtomName("CB");
+
+        if(lastCoords==null || NCoords==null || CACoords==null | CBCoords==null){
+            //Glycine or not a protein residue.  Doesn't have gen chi1
+            return null;
+        }
+
+        //coordinates defining dihedral
+        return new double[][] {NCoords,CACoords,CBCoords,lastCoords};
     }
     
     
@@ -67,7 +82,12 @@ public class GenChi1Calc {
         DihedralRotation dihRot = new DihedralRotation( res.getCoordsByAtomName("CA"),
                 res.getCoordsByAtomName("CB"), genChi1Change );
         
-        //now carry out the rotation on all the sidechain atoms
+        rotateSidechain(res, dihRot);
+    }
+    
+    
+    private static void rotateSidechain(Residue res, DihedralRotation dihRot){
+        //Carry out the gen chi1 rotation on all the sidechain atoms
         //(expect CB, since it's part of the bond begin rotated around)
         int numAtoms = res.atoms.size();
         for(int atomNum=0; atomNum<numAtoms; atomNum++){
@@ -79,9 +99,32 @@ public class GenChi1Calc {
                     dihRot.transform(res.coords, atomNum);
             }
         }
-
     }
     
+    
+    public static void setGenChi1SinCos(Residue res, double angSC[]){
+        //set the residue to have the specified gen chi1 (sine and cosine of angle provided)
+
+        if( (!HardCodedResidueInfo.hasAminoAcidBB(res)) 
+                || res.template.name.equalsIgnoreCase("GLY")
+                || res.template.name.equalsIgnoreCase("PRO") ){
+            //Glycine doesn't have a generalized chi1, 
+            //and we cannot freely change proline's (sidechain idealization sets
+            //a chi1 for proline that should remain in place)
+            return;
+        }
+        
+        double curGenChi1SC[] = getGenChi1SinCos(res);
+        double genChi1ChangeSC[] = new double[] {
+            angSC[0]*curGenChi1SC[1] - angSC[1]*curGenChi1SC[0],//sin(ang-current)
+            angSC[1]*curGenChi1SC[1] + angSC[0]*curGenChi1SC[0]//cos
+        };
+        
+        DihedralRotation dihRot = new DihedralRotation( res.getCoordsByAtomName("CA"),
+                res.getCoordsByAtomName("CB"), genChi1ChangeSC[0], genChi1ChangeSC[1] );
+        
+        rotateSidechain(res, dihRot);
+    }
     
     
     public static String getGenChi1LastAtom(String resName){//Get atom name X where generalized chi1 is N-CA-CB-X

@@ -60,6 +60,7 @@ import cern.colt.matrix.DoubleMatrix1D;
 import cern.colt.matrix.DoubleMatrix2D;
 import cern.colt.matrix.linalg.Algebra;
 import cern.colt.matrix.linalg.EigenvalueDecomposition;
+import edu.duke.cs.osprey.plug.RCTuplePolytope;
 
 
 public class EPolyPC extends EPoly {
@@ -81,13 +82,13 @@ public class EPolyPC extends EPoly {
 
     
     
-    public EPolyPC( EPoly template, int fullOrder, int PCOrder, double PCFac) {
+    public EPolyPC( EPoly template, int fullOrder, int PCOrder, double PCFac, RCTuplePolytope tope) {
         //set up the principal component basis and the DOF information
         //coeffs will be added later
         //since we will be using this EPolyPC object when performing the fitting
         
         super(template.numDOFs,template.DOFs,template.DOFmax,template.DOFmin,template.center,
-                template.minE,null,fullOrder);
+                template.minE,null,fullOrder,tope);
         
         //get the coordinate transformation into the eigenbasis of the template's Hessian
         //so we can use the high-eigenvalue directions as our principcal components

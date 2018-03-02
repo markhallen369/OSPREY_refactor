@@ -1,5 +1,6 @@
 package edu.duke.cs.osprey.kstar;
 
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import java.io.File;
 import java.math.BigInteger;
 import java.net.InetAddress;
@@ -476,7 +477,7 @@ public abstract class KSAbstract implements KSInterface {
                                     new LUTESettings(cfp.getParams()),
                                     dset, 
                                     moveableStrands, 
-                                    freeBBZones,
+                                    new CATSSettings(),//DEBUG!!
                                     useEllipses,
                                     useERef,
                                     addResEntropy,
@@ -502,7 +503,7 @@ public abstract class KSAbstract implements KSInterface {
                                     //Need to strip out non-sidechain continuous flexibility
                                     dset.makeDiscreteVersion(), 
                                     new ArrayList<>(), 
-                                    new ArrayList<>(),
+                                    new CATSSettings(),//DEBUG!!!
                             
                                     useEllipses,
                                     useERef,

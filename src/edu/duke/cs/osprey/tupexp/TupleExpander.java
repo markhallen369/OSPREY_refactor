@@ -4,11 +4,8 @@
  */
 package edu.duke.cs.osprey.tupexp;
 
-import cern.colt.matrix.DoubleFactory1D;
-import cern.colt.matrix.DoubleMatrix1D;
 import edu.duke.cs.osprey.confspace.RCTuple;
 import edu.duke.cs.osprey.ematrix.EnergyMatrix;
-import edu.duke.cs.osprey.tools.ObjectIO;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,7 +48,17 @@ public abstract class TupleExpander implements Serializable {
     
     static int printedUpdateNumTuples = 5;//100 w/o PB.  We print updates as we add tuples...this is how often
     
-    public TupleExpander (int numPos, int[] numAllowed/*, double constTerm*/, double pruningInterval, LUTESettings luteSettings) {
+    
+    boolean canCheckPartialPruning = true;//can evaluate new tuples
+    //by using isPairPrunedInSample rather than checking isPruned on whole conf
+    //PLUG can break this
+    
+    LUTECompStatus compStatus = null;//used for e.g. resumability
+    
+    
+    public TupleExpander (int numPos, int[] numAllowed/*, double constTerm*/, double pruningInterval, LUTESettings luteSettings
+    , LUTECompStatus compStatus) {
+        this.compStatus = compStatus;
         this.numPos = numPos;
         this.numAllowed = numAllowed;
         //this.constTerm = constTerm;
@@ -99,6 +106,32 @@ public abstract class TupleExpander implements Serializable {
             ans = Math.min(ans,score);
         }
         
+        System.out.println("Initial GMEC estimate: "+ans);
+        
+        return ans;
+    }
+    
+    public ArrayList<int[]> sampleRandomConfs(int numConfs){
+        TESampleSet tss = new TESampleSet(this);
+        ArrayList<int[]> ans = new ArrayList<>();
+        
+        //Let's make sure, by DFS, that there is at least one unpruned conf
+        int testSamp[] = new int[numPos];
+        Arrays.fill(testSamp, -1);
+        if( tss.finishSampleDFS(testSamp) == null )
+            throw new RuntimeException("ERROR: TupleExpander has no confs to sample");
+        
+        
+        for(int iter=0; iter<numConfs; iter++){
+            int sample[] = new int[numPos];
+            boolean success;
+            do {
+                Arrays.fill(sample,-1);
+                success = tss.finishSample(sample);
+            } while (!success);
+            
+            ans.add(sample);
+        }
         return ans;
     }
     
@@ -109,21 +142,24 @@ public abstract class TupleExpander implements Serializable {
         
         if(Double.isNaN(constTerm))//constTerm not computed yet
             constTerm = computeInitGMECEst();
-        
+
         if( constTerm == Double.POSITIVE_INFINITY ){
             System.out.println("No conformations found for tuple expansion.  ");
             tupleTerms = new double[0];//no coefficients needed besides constTerm
             return 0;//all confs are pruned, and will be correctly assigned infinite energy
         }
-        
+
         //this can be used for the first tuple expansion for this object, or to add tuples later (not take away though)
-        
+
         System.out.println("About to calculate tuple expansion with "+tuplesToFit.size()+" tuples.");
         //System.out.println("constTerm: "+constTerm+" bCutoff: "+bCutoff+" bCutoff2: "+bCutoff2);
 
-        
+
         setupSamples(tuplesToFit);//set up the training set (in the process, prune tuples that don't provide reasonable energies)
-                
+        return calcExpansionFromCurSamples();
+    }
+    
+    public double calcExpansionFromCurSamples(){
         fitLeastSquares();
         
         trainingSamples.updateFitVals(fof);
@@ -348,6 +384,10 @@ public abstract class TupleExpander implements Serializable {
         
         System.out.println("Adding tuples to expansion and drawing training samples...");
         
+        if(compStatus!=null)//pick all the samples first, then score them all
+            trainingSamples.setBlankScoreMode(true);
+        
+        
         for(int tupNum=0; tupNum<tuplesToFit.size(); tupNum++){
             if(tupNum>0 && (tupNum%printedUpdateNumTuples==0))
                 System.out.println(tupNum+" tuples added");
@@ -379,16 +419,30 @@ public abstract class TupleExpander implements Serializable {
         
         //now make sure the CV samples are updated too
         if(CVSamples==null){
-            CVSamples = new TESampleSet(this);
-            for(int t=0; t<tuples.size(); t++)
-                CVSamples.updateSamples(t);
+            CVSamples = new TESampleSet(this, compStatus!=null);
         }
+        
+        if(compStatus!=null)
+            CVSamples.setBlankScoreMode(true);
+        for(int t=0; t<tuples.size(); t++)
+            CVSamples.updateSamples(t);
             
         System.out.println("CV set done.");
+        
+        if(compStatus!=null){//time to score samples
+            trainingSamples.setBlankScoreMode(false);
+            CVSamples.setBlankScoreMode(false);
+            compStatus.save(this);//if we have to resume, we only need scoreSamples, not setupSamples
+            scoreUnscoredSamples();
+        }
     }
     
     
-    
+    void scoreUnscoredSamples(){
+        System.out.println("Scoring unscored samples...");
+        trainingSamples.scoreUnscoredSamples(compStatus);
+        CVSamples.scoreUnscoredSamples(compStatus);
+    }
     
     
     void fitLeastSquares(){
@@ -417,14 +471,29 @@ public abstract class TupleExpander implements Serializable {
     
     int numSampsPerTuple = 10;
     
-    int numSamplesNeeded(int tup){
+    public int numSamplesNeeded(int tup){
         //for a tuple (index in tuples), how many samples are needed?
         return numSampsPerTuple;//one param per tuple, so 10 samples should securely avoid overfitting
     }
     
-    void tryAddingTuple(RCTuple tup){
+    public void tryAddingTuple(RCTuple tup){
+        boolean tupFeas = trainingSamples.tupleFeasible(tup);
+        if(!tupFeas){
+            //make sure we didn't miss a tuple we already know from previous samples
+            //to be feasible.  This could result in pruning other tuples and general mess
+            for(TESampleSet tss : new TESampleSet[]{trainingSamples,CVSamples}){
+                if(tss!=null){
+                    for(int[] sample : tss.samples){
+                        if(sampleMatchesTuple(sample,tup)){
+                            tupFeas = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         
-        if(trainingSamples.tupleFeasible(tup)){
+        if(tupFeas){
             tuples.add(tup);
             int newTupleIndex = tuples.size()-1;//tup index in tuples
 
@@ -647,23 +716,45 @@ public abstract class TupleExpander implements Serializable {
         
         return ans;
     }
+
+    public ArrayList<RCTuple> getTuples() {
+        return tuples;
+    }
+    
+    public void scaleUpNumSampsPerTuple(int factor){
+        numSampsPerTuple *= factor;
+    }
+    
+    public void dumpSampleSets(String runName) {
+        trainingSamples.writeOutSamples(runName+".TRAININGSAMPLES.txt");
+        CVSamples.writeOutSamples(runName+".CVSAMPLES.txt");
+    }
+
+    public TESampleSet getTrainingSamples() {
+        return trainingSamples;
+    }
+
+    public void setTrainingSamples(TESampleSet trainingSamples) {
+        this.trainingSamples = trainingSamples;
+    }
+    
     
     
     //functions dependent on what the assignments mean, etc.
     
     //score a list of assignments for each position
-    abstract double scoreAssignmentList(int[] assignmentList);
+    public abstract double scoreAssignmentList(int[] assignmentList);
     
     //prune, or check pruning of, a tuple
-    abstract boolean isPruned(RCTuple tup);
-    abstract void pruneTuple(RCTuple tup);
+    public abstract boolean isPruned(RCTuple tup);
+    public abstract void pruneTuple(RCTuple tup);
     
     
     //list higher-order pruned tuples that include the specified pair
-    abstract ArrayList<RCTuple> higherOrderPrunedTuples(RCTuple tup);
-    
-    
+    public abstract ArrayList<RCTuple> higherOrderPrunedTuples(RCTuple tup);
 
+
+    
     
 
     

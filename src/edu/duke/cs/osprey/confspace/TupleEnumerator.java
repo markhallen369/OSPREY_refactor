@@ -5,9 +5,13 @@
 package edu.duke.cs.osprey.confspace;
 
 import edu.duke.cs.osprey.ematrix.EnergyMatrix;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 import edu.duke.cs.osprey.pruning.PruningMatrix;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.PriorityQueue;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -18,12 +22,14 @@ public class TupleEnumerator {
     
     PruningMatrix pruneMat;//for figuring out which are unpruned
     EnergyMatrix emat;//for figuring out which tuples interact strongly
+    PolytopeMatrix plugMat;//ditto.  Can be null if needed
     int numPosTotal;//total number of positions
 
     
-    public TupleEnumerator(PruningMatrix pruneMat, EnergyMatrix emat, int numPosTotal) {
+    public TupleEnumerator(PruningMatrix pruneMat, EnergyMatrix emat, PolytopeMatrix plugMat, int numPosTotal) {
         this.pruneMat = pruneMat;
         this.emat = emat;
+        this.plugMat = plugMat;
         this.numPosTotal = numPosTotal;
     }
     
@@ -199,6 +205,83 @@ public class TupleEnumerator {
 
     public void setEmat(EnergyMatrix emat) {
         this.emat = emat;
+    }
+    
+    
+    public ArrayList<RCTuple> enumeratePLUGContactPairs(){
+        //Unpruned pairs that have contacts detected by PLUG
+        List<RCTuple> ans = enumerateUnprunedTuples(2).stream()
+                .filter(tup->plugMat.getTupleValue(tup).hasNonBoxConstr())
+                .collect(Collectors.toList());
+        
+        return new ArrayList(ans);
+    }
+    
+    public ArrayList<RCTuple> enumeratePLUGCliqueTriples(){
+        //Unpruned triples in which all 3 pairs have contacts detected by PLUG
+        return enumeratePLUGTriples(true);
+    }
+    
+    public ArrayList<RCTuple> enumeratePLUG2PairTriples(){
+        //Unpruned triples in which >= 2 of the 3 pairs have contacts detected by PLUG
+        return enumeratePLUGTriples(false);
+    }
+    
+    public ArrayList<RCTuple> enumeratePLUGTriples(boolean clique){
+        ArrayList<RCTuple> ans = new ArrayList<>();
+        for(RCTuple contactPair : enumeratePLUGContactPairs()){
+            for(int pos=0; pos<Math.min(contactPair.pos.get(0), contactPair.pos.get(1)); pos++){
+                for(int rc=0; rc<pruneMat.getNumConfAtPos(pos); rc++){
+                    RCTuple triple = contactPair.addRC(pos, rc);
+                    if(!pruneMat.isPruned(triple)){
+                        RCTuple pair2 = triple.subtractMember(0);
+                        boolean pair2Contact = plugMat.getTupleValue(pair2).hasNonBoxConstr();
+                        RCTuple pair3 = triple.subtractMember(1);
+                        boolean pair3Contact = plugMat.getTupleValue(pair3).hasNonBoxConstr();
+                        if(clique){
+                            if(pair2Contact&&pair3Contact){
+                                ans.add(triple);
+                            }
+                        }
+                        else {
+                            if(pair2Contact||pair3Contact){
+                                ans.add(triple);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ans;
+    }
+    
+    public ArrayList<RCTuple> enumeratePLUGCliqueQuads(){
+        //Unpruned quads in which all pairs have PLUG contact
+        ArrayList<RCTuple> ans = new ArrayList<>();
+        for(RCTuple triple : enumeratePLUGCliqueTriples()){
+            int minPos = Collections.min(triple.pos);//avoid redundancy
+            for(int pos=0; pos<minPos; pos++){
+                for(int rc=0; rc<pruneMat.getNumConfAtPos(pos); rc++){
+                    RCTuple quad = triple.addRC(pos, rc);
+                    if(!pruneMat.isPruned(quad)){
+                        boolean isClique = true;
+                        //see if all pairs in the quad involving the new pos interact
+                        for(int a=0; a<3; a++){
+                            for(int b=0; b<2; b++){
+                                RCTuple otherPair = quad.subtractMember(a).subtractMember(b);
+                                if(!plugMat.getTupleValue(otherPair).hasNonBoxConstr()){
+                                    isClique = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if(isClique)
+                            ans.add(quad);
+                    }
+                }
+            }
+        }
+        return ans;
     }
     
     

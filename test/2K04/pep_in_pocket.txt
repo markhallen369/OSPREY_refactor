@@ -1,0 +1,30 @@
+110-117
+maybe 113-118
+
+it doesn’t matter how many res you do
+decent # would be cool
+
+let’s do 110-117, want to be realistic
+can always sample tuples since they are pruned independently…
+cut down if desired
+
+
+flex res will be key wt contact
+since it would be sil to pretend this is really an ab initio system, rather sort of recapping cxcl12/cxcr4
+
+mutable res and their rots & main sidechain contacts:
+
+110: Asp; 175/-87; 112,224,225 NOTE THIS IS ACROSS DIMER
+111: Asn; -172/-27; 3
+112: Tyr; -173/67/-135; 10,27,29,110
+113: Thr; -54/-26; solvent
+114: Glu; 50/175/62; 2 (may also not mutate bc lots of solvent?)
+115: Glu; -172/-179/57; 48 (&ditto?)
+116: Met; -63/-176/63; 47
+117: Gly
+118: Ser; -55/47; 15,50
+
+FLEXRESCONTACT USE SC CONTACT
+flex/mut:
+2 10 15 27 29 47 48 50 112 113 114 115 116 117 118
+

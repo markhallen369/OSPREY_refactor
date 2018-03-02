@@ -4,6 +4,7 @@
  */
 package edu.duke.cs.osprey.confspace;
 
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import java.io.Serializable;
 import java.util.ArrayList;
 
@@ -17,11 +18,14 @@ import edu.duke.cs.osprey.ematrix.epic.EPICMatrix;
 import edu.duke.cs.osprey.ematrix.epic.EPICSettings;
 import edu.duke.cs.osprey.energy.EnergyFunction;
 import edu.duke.cs.osprey.energy.EnergyFunctionGenerator;
+import edu.duke.cs.osprey.energy.forcefield.ForcefieldParams;
 import edu.duke.cs.osprey.kstar.KSTermini;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 import edu.duke.cs.osprey.pruning.PruningMatrix;
 import edu.duke.cs.osprey.structure.Residue;
 import edu.duke.cs.osprey.tools.ObjectIO;
 import edu.duke.cs.osprey.tupexp.ConfETupleExpander;
+import edu.duke.cs.osprey.tupexp.LUTECompStatus;
 import edu.duke.cs.osprey.tupexp.LUTESettings;
 import edu.duke.cs.osprey.tupexp.TupExpChooser;
 import edu.duke.cs.osprey.voxq.VoxelGCalculator;
@@ -78,6 +82,14 @@ public class SearchProblem implements Serializable {
     public boolean addResEntropy = false;
     
     public int numEmatThreads = 1;
+    public PolytopeMatrix plugMat;
+    
+    public EnergyFunction auxFullConfE;//energy function for finding the DOF vals at the minimum,
+    //which will then be evaluated using fullConfE.  Null by default -> minimize fullConfE itself
+    
+    
+    //DEBUG!!
+    public static boolean testPLUGTuples = false;//Try several different types of tuples, use the best
     
     
     public SearchProblem(SearchProblem sp1){//shallow copy
@@ -107,11 +119,11 @@ public class SearchProblem implements Serializable {
     
     public SearchProblem(String name, String PDBFile, ArrayList<String> flexibleRes, ArrayList<ArrayList<String>> allowedAAs, boolean addWT,
             boolean contSCFlex, boolean useEPIC, EPICSettings epicSettings, boolean useTupExp, LUTESettings luteSettings, DEEPerSettings dset, 
-            ArrayList<String[]> moveableStrands, ArrayList<String[]> freeBBZones, boolean useEllipses, boolean useERef,
+            ArrayList<String[]> moveableStrands, CATSSettings catsSettings, boolean useEllipses, boolean useERef,
             boolean addResEntropy, boolean addWTRots, KSTermini termini, boolean useVoxelG, ArrayList<String> wtRotOnlyRes){
         
         confSpace = new ConfSpace(PDBFile, flexibleRes, allowedAAs, addWT, wtRotOnlyRes,
-                contSCFlex, dset, moveableStrands, freeBBZones, useEllipses, addWTRots, termini);
+                contSCFlex, dset, moveableStrands, catsSettings, useEllipses, addWTRots, termini);
         this.name = name;
         
         
@@ -129,6 +141,12 @@ public class SearchProblem implements Serializable {
         EnergyFunctionGenerator eGen = EnvironmentVars.curEFcnGenerator;
         decideShellResidues(eGen.distCutoff);
         fullConfE = eGen.fullConfEnergy(confSpace,shellResidues);
+        if(EnvironmentVars.pbUseAux && eGen.usePoissonBoltzmann){
+            ForcefieldParams auxFF = (ForcefieldParams)ObjectIO.deepCopy(eGen.ffParams);
+            auxFF.doSolvationE = true;
+            EnergyFunctionGenerator auxEGen = new EnergyFunctionGenerator(auxFF,eGen.distCutoff,false);
+            auxFullConfE = auxEGen.fullConfEnergy(confSpace, shellResidues);
+        }
     }
     
     
@@ -168,7 +186,13 @@ public class SearchProblem implements Serializable {
         if(useVoxelG)//use free instead of minimized energy
             return gCalc.calcG(conf);
         
-        double E = confSpace.minimizeEnergy(conf, fullConfE, null);
+        double E;
+        if(auxFullConfE!=null)
+            E = confSpace.minimizeEnergy(conf, auxFullConfE, fullConfE, null, luteSettings.useSQP);
+        else if(luteSettings.minimizeWithPLUG)
+            E = confSpace.minimizeEnergyWithPLUG(conf, fullConfE, null, plugMat);
+        else
+            E = confSpace.minimizeEnergy(conf, fullConfE, null, luteSettings.useSQP);
         
         if(useERef)
             E -= emat.geteRefMat().confERef(conf);
@@ -215,11 +239,12 @@ public class SearchProblem implements Serializable {
         if(useVoxelG)
             return voxelFreeEnergy(conf);
         
-        double bound = emat.confE(conf);//emat contains the pairwise lower bounds
-        double contPart = epicMat.minContE(conf);
-        //EPIC handles the continuous part (energy - pairwise lower bounds)
-
-        return bound+contPart;
+        if(luteSettings.minimizeWithPLUG)
+            return epicMat.getConfSpace().minimizeEnergyWithPLUG(conf, epicMat.internalEnergyFunction(new RCTuple(conf),true), null, plugMat);
+        else if(luteSettings.usePLUGEnhancedMinimizer)
+            return epicMat.minimizeEnergy(new RCTuple(conf), luteSettings.useSQP, true, plugMat, luteSettings.numConsistent);
+        else
+            return epicMat.minimizeEnergy(new RCTuple(conf), luteSettings.useSQP, true, null, 1);
     }
     
     
@@ -248,6 +273,10 @@ public class SearchProblem implements Serializable {
         loadMatrix(MatrixType.TUPEXPEMAT);
     }
     
+    public void loadPLUGMatrix(){//just loads the matrix--pruning can be handled by multi-term pruner
+        loadMatrix(MatrixType.PLUGMAT);
+    }
+    
     public void loadEPICMatrix(){
         loadMatrix(MatrixType.EPICMAT);
         
@@ -257,7 +286,8 @@ public class SearchProblem implements Serializable {
     
     
     public enum MatrixType {
-        EMAT, TUPEXPEMAT, EPICMAT;
+        EMAT, TUPEXPEMAT, EPICMAT, PLUGMAT;
+        //not prunemat (at least for now) because pruning may be updated multiple times
     }
     
     
@@ -337,40 +367,61 @@ public class SearchProblem implements Serializable {
         }
         else if(type == MatrixType.EPICMAT){
             EnergyMatrixCalculator emCalc = new EnergyMatrixCalculator(confSpace,shellResidues,
-                    pruneMat,epicSettings);
+                    pruneMat,epicSettings,plugMat);
             emCalc.calcPEM();
             return emCalc.getEPICMatrix();
         }
+        else if(type == MatrixType.PLUGMAT){//Let's not prune for now
+            return new PolytopeMatrix(this, false);
+        }
         else {
             //need to calculate a tuple-expansion matrix
-            
-            ConfETupleExpander expander = new ConfETupleExpander(this);//make a tuple expander
-            
-            
-            TupleEnumerator tupEnum = new TupleEnumerator(pruneMat,emat,confSpace.numPos);
-            TupExpChooser chooser = new TupExpChooser(expander, tupEnum);//make a chooser to choose what tuples will be in the expansion
-            
-            double curResid = chooser.calcPairwiseExpansion();//start simple...
-            
-            if(curResid > luteSettings.goalResid){//go to triples if needed
-                System.out.println("EXPANDING PAIRWISE EXPANSION WITH STRONGLY PAIR-INTERACTING TRIPLES (2 PARTNERS)...");
-                curResid = chooser.calcExpansionResTriples(2);
-            }
-            if(curResid > luteSettings.goalResid){//go to 5 partners if still need better resid...
-                System.out.println("EXPANDING EXPANSION WITH STRONGLY PAIR-INTERACTING TRIPLES (5 PARTNERS)...");
-                curResid = chooser.calcExpansionResTriples(5);
-            }
-            if(curResid > luteSettings.goalResid){
-                System.out.println("WARNING: Desired LUTE residual threshold "+
-                        luteSettings.goalResid+" not reached; best="+curResid);
-            }
-            
-            return expander.getEnergyMatrix();//get the final energy matrix from the chosen expansion
+            if(testPLUGTuples)
+                return makeLUTECompStatus().precomputeLUTE();
+            else
+                return precomputeLUTEClassic();
         }
+    }
+    
+    
+    private LUTECompStatus makeLUTECompStatus(){
+        //See if we have an active LUTECompStatus on disk; load if there is
+        String compStatusFileName = name+".LUTECOMP.tmp";
+        LUTECompStatus compStatus = (LUTECompStatus) ObjectIO.readObject(compStatusFileName, true);
+        if(compStatus==null)
+            compStatus = new LUTECompStatus(this, compStatusFileName);
+        else
+            compStatus.setSp(this);//this may be huge so we don't serialize it.  
+        return compStatus;
+    }
+    
+    
+    private EnergyMatrix precomputeLUTEClassic(){
+        ConfETupleExpander expander = new ConfETupleExpander(this,null);//make a tuple expander
+
+        TupleEnumerator tupEnum = new TupleEnumerator(pruneMat,emat,plugMat,confSpace.numPos);
+        TupExpChooser chooser = new TupExpChooser(expander, tupEnum);//make a chooser to choose what tuples will be in the expansion
+        
+        double curResid = chooser.calcPairwiseExpansion();//start simple...
+
+        if(curResid > luteSettings.goalResid){//go to triples if needed
+            System.out.println("EXPANDING PAIRWISE EXPANSION WITH STRONGLY PAIR-INTERACTING TRIPLES (2 PARTNERS)...");
+            curResid = chooser.calcExpansionResTriples(2);
+        }
+        if(curResid > luteSettings.goalResid){//go to 5 partners if still need better resid...
+            System.out.println("EXPANDING EXPANSION WITH STRONGLY PAIR-INTERACTING TRIPLES (5 PARTNERS)...");
+            curResid = chooser.calcExpansionResTriples(5);
+        }
+        if(curResid > luteSettings.goalResid){
+            System.out.println("WARNING: Desired LUTE residual threshold "+
+                    luteSettings.goalResid+" not reached; best="+curResid);
+        }
+        
+        return expander.getEnergyMatrix();//get the final energy matrix from the chosen expansion
     }
 
     
-    
+
     boolean loadMatrixFromFile(MatrixType type, String matrixFileName){
         //try loading the specified matrix from a file
         //return true if successful, false if not, in which case we'll have to compute it
@@ -382,6 +433,8 @@ public class SearchProblem implements Serializable {
             emat = (EnergyMatrix) matrixFromFile;
         else if(type == MatrixType.EPICMAT)
             epicMat = (EPICMatrix) matrixFromFile;
+        else if(type == MatrixType.PLUGMAT)
+            plugMat = (PolytopeMatrix) matrixFromFile;
         else //tup-exp
             tupExpEMat = (EnergyMatrix) matrixFromFile;
         

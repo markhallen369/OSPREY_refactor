@@ -35,8 +35,8 @@ public class RamachandranChecker {
 
 
 
-    static double denCutoff = 0.02f;//Cutoff density for being allowed
-
+    static double denCutoff = 0.01f;//Cutoff density for being allowed
+//DEBUG!!!!!! was 0.02
     private RamachandranChecker() {
         
     }
@@ -164,6 +164,27 @@ public class RamachandranChecker {
         else
             return false;
     }
+    
+    
+    public double getLinInterpDensity(double phi, double psi, int plotNum){
+        phi = getInRangeLin(phi);
+        psi = getInRangeLin(psi);
+        
+        int phiBin = (int)((phi+179)/2);//starting point for interval phi is in
+        double phiUpPortion = (phi+179)/2 - phiBin;
+        int phiBinUp = phiBin+1==180 ? 0 : phiBin+1;
+        
+        int psiBin = (int)((psi+179)/2);
+        double psiUpPortion = (psi+179)/2 - psiBin;
+        int psiBinUp = psiBin+1==180 ? 0 : psiBin+1;
+        
+        double den = tables[plotNum][phiBin][psiBin] * (1-phiUpPortion) * (1-psiUpPortion)
+                + tables[plotNum][phiBinUp][psiBin] * phiUpPortion * (1-psiUpPortion)
+                + tables[plotNum][phiBin][psiBinUp] * (1-phiUpPortion) * psiUpPortion
+                + tables[plotNum][phiBinUp][psiBinUp] * phiUpPortion * psiUpPortion;
+        
+        return den;
+    }
 
     
     double getInRange(double angle){
@@ -171,6 +192,15 @@ public class RamachandranChecker {
         while(angle>=180)
             angle -= 360;
         while(angle<-180)
+            angle += 360;
+        return angle;
+    }
+    
+    double getInRangeLin(double angle){
+        //For lin interp will want range [-179,181)
+        while(angle>=181)
+            angle -= 360;
+        while(angle<-179)
             angle += 360;
         return angle;
     }

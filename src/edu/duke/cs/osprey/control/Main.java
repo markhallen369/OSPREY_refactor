@@ -4,6 +4,7 @@
  */
 package edu.duke.cs.osprey.control;
 
+import edu.duke.cs.osprey.confspace.RCTuple;
 import edu.duke.cs.osprey.energy.LigandResEnergies;
 import java.util.HashMap;
 import java.util.Map;
@@ -11,6 +12,8 @@ import edu.duke.cs.osprey.energy.MultiTermEnergyFunction;
 import edu.duke.cs.osprey.kstar.KSConfigFileParser;
 import edu.duke.cs.osprey.minimization.CCDMinimizer;
 import edu.duke.cs.osprey.parallelism.ThreadParallelism;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
+import edu.duke.cs.osprey.plug.PureGeomDFS;
 import edu.duke.cs.osprey.tests.UnitTestSuite;
 
 /**
@@ -157,6 +160,21 @@ public class Main {
 			public void run() {
 				SeqGMECFinder sgf = new SeqGMECFinder(args, cfp.getParams().getValue("MutFile"));
                                 sgf.calcAllSeqGMECs();
+			}
+		});
+                
+                commands.put("doPureGeomDFS", new Runnable() {
+			@Override
+			public void run() {
+                            new PureGeomDFSer(cfp).doSearch();
+			}
+		});
+                
+                commands.put("precomputeResumably", new Runnable() {
+                    //use this command both to start and to resume
+			@Override
+			public void run() {
+                            new ResumableMatrixPrecomputer(cfp).precomputeMatrices();
 			}
 		});
 	}

@@ -120,11 +120,13 @@ public class SidechainIdealizer {
             double ABOld[] = VectorAlgebra.subtract(CBCoord, CACoord);
             double ABNew[] = VectorAlgebra.subtract(idealCB, CACoord);
             double theta = Protractor.getAngleRadians( ABOld, ABNew );
+            //double thetaSC[] = Protractor.getAngleSinCos( ABOld, ABNew );
             double rotax[] = VectorAlgebra.cross(ABOld, ABNew);
             //RotationMatrix SC_mtx;
 
             if( VectorAlgebra.norm(rotax) != 0 ){//CB not already in the ideal position
                 RotationMatrix SC_mtx = new RotationMatrix(rotax[0], rotax[1], rotax[2], theta, true);
+                //RotationMatrix SC_mtx = new RotationMatrix(rotax[0], rotax[1], rotax[2], thetaSC[0], thetaSC[1]);
                 RigidBodyMotion SC_motion = new RigidBodyMotion(CACoord, SC_mtx,CACoord);
                 moveSidechain(res,SC_motion);
             }

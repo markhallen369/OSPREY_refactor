@@ -103,6 +103,9 @@ public class ConfPrinter {
         // useful to see EPIC energy (confE is regular E, lowerBound is tup-exp)
         if (printEPICEnergy) {
             buf.append(String.format(LabelFormat + "%.6f\n", "EPIC", searchSpace.EPICMinimizedEnergy(conf.getAssignments())));
+            if(searchSpace.luteSettings.minimizeWithPLUG)//want to compare to non-EPIC energy with PLUG constr
+                    buf.append(String.format(LabelFormat + "%.6f\n", "PLUG-constrained", searchSpace.minimizedEnergy(conf.getAssignments())));
+
         }
         
         return buf.toString();
@@ -156,6 +159,9 @@ public class ConfPrinter {
             confFileHandle.write("Score: "+conf.getScore()+" Energy: "+conf.getEnergy()+" Best so far: "+minEnergy);
             if (epicEnergy != null) {
             	confFileHandle.write(" EPIC energy: " + searchSpace.EPICMinimizedEnergy(conf.getAssignments()));
+                
+                if(searchSpace.luteSettings.minimizeWithPLUG)//want to compare to non-EPIC energy with PLUG constr
+                    confFileHandle.write(" PLUG-constrained energy: " + searchSpace.minimizedEnergy(conf.getAssignments()));
             }
             confFileHandle.write("\n");
             

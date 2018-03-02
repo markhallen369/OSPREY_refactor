@@ -20,6 +20,7 @@ import edu.duke.cs.osprey.confspace.SearchProblem;
 import edu.duke.cs.osprey.energy.forcefield.ForcefieldParams;
 import edu.duke.cs.osprey.parallelism.Parallelism;
 import edu.duke.cs.osprey.partcr.PartCRConfPruner;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 import edu.duke.cs.osprey.pruning.Pruner;
 import edu.duke.cs.osprey.pruning.PruningControl;
 import edu.duke.cs.osprey.pruning.PruningMatrix;
@@ -77,6 +78,16 @@ public class GMECFinder {
     private boolean logConfsToConsole;
     
     private double lowestBound;
+    
+    private boolean usePLUG;//Use PLUG, including multi-term pruning
+    static boolean PLUGPruneTriples = true;//Seems fast enough (cubic time--no competitors)
+    private boolean useDEE = true;//Sometimes may not want to prune with DEE, esp if using PLUG
+    //(note: will skip DEE regardless if not pairwise E-fcn)
+    
+    //indicates to use resumably precomputed matrices (if they are available)
+    boolean useRPMat = false;
+    
+    int outputNumStructs = -1;//if not -1, output this many of the top structures, if available
     
     public GMECFinder() {
         
@@ -159,9 +170,17 @@ public class GMECFinder {
             throw new RuntimeException("ERROR: iMinDEE requires continuous flexibility");
         
         outputGMECStruct = cfp.params.getBool("OUTPUTGMECSTRUCT");
+        outputNumStructs = cfp.params.getInt("OUTPUTNUMSTRUCTS",-1);
         
         //for now only full-conf-only E-fcn supported is Poisson-Boltzmann
         EFullConfOnly = cfp.params.getBool("UsePoissonBoltzmann");
+        
+        usePLUG = cfp.params.getBool("UsePLUG");
+        
+        useRPMat = cfp.params.getBool("USERPMAT",false);
+        useDEE = cfp.params.getBool("USEDEE", true);
+        if(!useDEE)
+            doIMinDEE = false;//no imindee if no dee at all
         
         confFileName = cfp.params.getRunSpecificFileName("CONFFILENAME", ".confs.txt");
         
@@ -209,9 +228,10 @@ public class GMECFinder {
 				
 			} else {
 				
-				boolean avoidCopyingMolecules = false;
+				boolean avoidCopyingMolecules = EFullConfOnly;
                                 //MH: All the current conformational perturbations as of 9/12/16 should support copying
                                 //to new molecules, but I'll leave this option in case new DOFs or something cause an issue
+                                //PB still an issue though!
 				if (avoidCopyingMolecules) {
 					System.out.println("\n\nWARNING: concurrent minimizations disabled\n");
 					
@@ -418,6 +438,12 @@ public class GMECFinder {
             }
         }
         
+        for(int c=0; c<Math.min(outputNumStructs,econfs.size()); c++){
+            searchSpace.outputMinimizedStruct(econfs.get(c).getAssignments(), searchSpace.name + ".STRUCT"+c+".pdb");
+        }
+        
+
+        
         // we didn't prune it! minEnergyConf is the minGMEC!! =)
         EnergiedConf minGMEC = minEnergyConf;
         System.out.println(String.format("\nFound minGMEC!"));
@@ -557,6 +583,10 @@ public class GMECFinder {
             fullConfOnlyTupExp();
             return;
         }
+        else if(searchSpace.useVoxelG){//Can't do DEE here either, but want EPIC
+            voxelGTupExp();
+            return;
+        }
     
         //First calculate the pairwise energy matrix, if not already present
         if (searchSpace.emat == null) {
@@ -584,9 +614,19 @@ public class GMECFinder {
 
         //Doing competitor pruning now
         //will limit us to a smaller, but effective, set of competitors in all future DEE
-        if(searchSpace.competitorPruneMat == null){
+        if(searchSpace.competitorPruneMat == null && useDEE){
             System.out.println("PRECOMPUTING COMPETITOR PRUNING MATRIX");
             initPruning(0, false, false);
+            
+            //DEBUG!!!
+            if(usePLUG){
+                /*searchSpace.plugMat = new PolytopeMatrix(searchSpace,true);
+                if(multiTermPLUGPruning)
+                    searchSpace.plugMat.doMultiTermPruning(searchSpace.pruneMat, PLUGPruneTriples);*/
+                searchSpace.loadPLUGMatrix();
+                searchSpace.plugMat.doMultiTermPruning(searchSpace.pruneMat, PLUGPruneTriples);
+            }
+            
             pruningControl.setOnlyGoldstein(true);
             pruningControl.prune();
             searchSpace.competitorPruneMat = searchSpace.pruneMat;
@@ -597,32 +637,56 @@ public class GMECFinder {
         
         //Next, do DEE, which will fill in the pruning matrix
         initPruning(pruningInterval, false, false);
-        pruningControl.prune();//pass in DEE options, and run the specified types of DEE            
+       
+        if(usePLUG){//DEBUG!!  should reuse from competitor prolly
+            searchSpace.loadPLUGMatrix();
+            searchSpace.plugMat.doMultiTermPruning(searchSpace.pruneMat, PLUGPruneTriples);
+        }
         
+        if(useDEE)
+            pruningControl.prune();//pass in DEE options, and run the specified types of DEE            
         
         //precomputing EPIC or tuple-expander matrices is much faster
         //if only done for unpruned RCs.  Less RCs to handle, and the fits are far simpler.  
         if(useEPIC){
             searchSpace.loadEPICMatrix();
             
+                    
+        /*ObjectIO.writeObject(searchSpace.plugMat,"ibis.PLUGMAT.dat");
+        ObjectIO.writeObject(searchSpace.pruneMat,"ibis.PRUNEMAT.dat");
+        ObjectIO.writeObject(searchSpace.epicMat,"ibis.EPICMAT.dat");
+        System.exit(0);*///DEBUG!!! for ibis testing*/
+        //may also comment out pruning above for bigger ibis space
+  
+            
             //we can prune more using the EPIC matrix
-            if(searchSpace.epicSettings.useEPICPruning){
+            if(searchSpace.epicSettings.useEPICPruning && useDEE){
                 System.out.println("Beginning post-EPIC pruning.");
                 initPruning(pruningInterval, true, false);
                 pruningControl.prune();
                 System.out.println("Finished post-EPIC pruning.");
             }
-        }
+        }      
         if(useTupExp){//preferably do this one EPIC loaded (much faster if can fit to EPIC)
             searchSpace.loadTupExpEMatrix();
+            
+            
+            /*ObjectIO.writeObject(searchSpace.plugMat,"ibis.PLUGMAT.dat");
+            ObjectIO.writeObject(searchSpace.pruneMat,"ibis.PRUNEMAT.dat");
+            ObjectIO.writeObject(searchSpace.tupExpEMat,"ibis.LUTEMAT.dat");
+            System.exit(0);*/
+            //DEBUG!!!!  For IBIS LUTE-->K* testing
+            
             
             //we can prune even more with tup-exp!
             //we can prune more using the EPIC matrix
             //no iMinDEE interval needed here
-            System.out.println("Beginning post-tup-exp pruning.");
-            initPruning(Ew, false, true);
-            pruningControl.prune();
-            System.out.println("Finished post-tup-exp pruning.");
+            if(useDEE){
+                System.out.println("Beginning post-tup-exp pruning.");
+                initPruning(Ew, false, true);
+                pruningControl.prune();
+                System.out.println("Finished post-tup-exp pruning.");
+            }
         }
     }
     
@@ -662,7 +726,43 @@ public class GMECFinder {
         //May want to set a lower thresh than the default (30 perhaps)
         Pruner pruner = new Pruner(searchSpace, false, 0, 0, false, false);
         pruner.pruneSteric(stericThresh);
+        
+        if(usePLUG){//still valid here, and provides better pruning
+            searchSpace.loadPLUGMatrix();
+            searchSpace.plugMat.doMultiTermPruning(searchSpace.pruneMat, PLUGPruneTriples);
+        }
                 
+        searchSpace.loadTupExpEMatrix();
+    }
+    
+    
+    
+    private void voxelGTupExp(){
+        //precompute the tuple expansion
+        if(!useTupExp)
+            throw new RuntimeException("ERROR: Need tuple expansion to handle voxelG");
+        if(!useEPIC)//later consider using differencing scheme to do EPIC for these
+            throw new RuntimeException("ERROR: Need EPIC to handle voxelG");
+        if(doIMinDEE)//don't have concept of pairwise lower bound, so not doing iMinDEE 
+            //(can just do rigid pruning on tup-exp matrix, even if using cont flex)
+            throw new RuntimeException("ERROR: iMinDEE + voxelG not supported");
+        
+        
+        //Let's compute a matrix from the pairwise terms (no entropy), to use in selecting triples
+        searchSpace.loadEnergyMatrix();
+        
+        //initialize pruning matrix.  Nothing pruned yet because don't have pairwise energies
+        searchSpace.pruneMat = new PruningMatrix(searchSpace.confSpace,Ew);//not iMinDEE
+        
+        Pruner pruner = new Pruner(searchSpace, false, 0, 0, false, false);
+        pruner.pruneSteric(stericThresh);
+        
+        if(usePLUG){//still valid here, and provides better pruning
+            searchSpace.loadPLUGMatrix();
+            searchSpace.plugMat.doMultiTermPruning(searchSpace.pruneMat, PLUGPruneTriples);
+        }
+        
+        searchSpace.loadEPICMatrix();//sets up both EPIC matrix and voxel G calculator
         searchSpace.loadTupExpEMatrix();
     }
     

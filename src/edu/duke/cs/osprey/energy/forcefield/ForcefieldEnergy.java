@@ -792,6 +792,297 @@ public class ForcefieldEnergy implements Serializable {
 		
 		return energy;
 	}
+        
+        
+        
+        public double[][][] calculateEnergyTermsAndDerivs() {
+            //This is for calculating gradients and Hessians
+            //A ForcefieldEnergy is a sum of terms depending on interatomic distances
+            //answer[i][j][k] is the k'th derivative (k=0 to 2) of the interaction
+            //between atoms i and j (of res1 and res2 respectively)
+		
+            double[][][] ans = new double[res1.atoms.size()][res2.atoms.size()][3];
+                    
+		int atomix4, atomjx4, atomi, atomj;
+		int ix5, ix8;
+		double rij, rij2, rij6, rij12;
+		double rijx, rijy, rijz;
+		double chargei, chargej, Aij, Bij;
+		double coulombFactor;
+		boolean isHydrogen, isHeavy;
+		
+		// update coords
+		coordsAndCharges.updateCoords();
+		
+		//--------------------------------------------
+		// compute electrostatics and vdW energies
+		//--------------------------------------------
+		// OPTIMIZATION: this used to be a separate function, but inlining it helps us go faster
+		
+		// This function calculates the electrostatic and vdw (EV) energy of a system
+		// Energy values are 'R'eturned in EenergyR and VenergyR
+		// vdwMultiplier is the soft-potential multiplier, if equal to 1.0 it has no effect,
+		//  values <1.0 allow for slight overpacking
+		// Makes use of the halfNBeval and NBeval arrays
+		//   0 - compute neither elect nor vdw terms
+		//   1 - compute both elect and vdw terms
+		//   2 - compute only elect term
+		//   3 - compute only vdw term
+		
+		// OPTIMIZING: apparently copying these values/references to the stack
+		//             gives a small but noticeable performance speedup
+		int numberHalfNonBonded = this.numberHalfNonBonded;
+		double[] halfNonBondedTerms = this.halfNonBondedTerms;
+		int numberNonBonded = this.numberNonBonded;
+		double[] nonBondedTerms = this.nonBondedTerms;
+		double[] data = this.coordsAndCharges.data;
+		int res1Start = this.coordsAndCharges.res1Start;
+		int res2Start = this.coordsAndCharges.res2Start;
+		boolean useHydrogenEs = this.useHydrogenEs;
+		boolean useHydrogenVdw = this.useHydrogenVdw;
+		boolean distDepDielect = this.distDepDielect;
+		boolean isInternal = this.isInternal;
+		double solvCutoff2 = this.solvCutoff*this.solvCutoff;
+		int numberSolvated = this.numberSolvated;
+		double[] solvationTerms = this.solvationTerms;
+		
+		// shortcuts
+		boolean useHydrogenNeither = !useHydrogenEs && !useHydrogenVdw;
+		
+		// half non-bonded terms
+		// 1-4 electrostatic terms are scaled by 1/1.2
+		switch(params.forcefld){
+			case AMBER:
+				coulombFactor = (constCoulomb/1.2) / (dielectric);
+				break;
+			case CHARMM19:
+			case CHARMM19NEUTRAL:
+				coulombFactor = (constCoulomb * 0.4) / (dielectric);
+				break;
+			default:
+				coulombFactor = 0;
+				System.out.println("FORCEFIELD NOT RECOGNIZED!!!");
+				System.exit(0);
+				break;
+		}
+		
+		ix5 = -5;
+		for(int i=0; i<numberHalfNonBonded; i++) {
+			ix5 += 5;
+			
+			isHydrogen = halfNonBondedTerms[ix5 + 2] == 1;
+			if (isHydrogen && useHydrogenNeither) {
+				continue;
+			}
+			isHeavy = !isHydrogen;
+			
+			// read table parts
+			atomi = (int)halfNonBondedTerms[ix5];
+			atomj = (int)halfNonBondedTerms[ix5 + 1];
+			Aij = halfNonBondedTerms[ix5 + 3];
+			Bij = halfNonBondedTerms[ix5 + 4];
+			
+			// read coords
+			atomix4 = atomi * 4;
+			atomjx4 = atomj * 4;
+			rijx = data[res1Start + atomix4] - data[res2Start + atomjx4];
+			rijy = data[res1Start + atomix4 + 1] - data[res2Start + atomjx4 + 1];
+			rijz = data[res1Start + atomix4 + 2] - data[res2Start + atomjx4 + 2];
+			chargei = data[res1Start + atomix4 + 3];
+			chargej = data[res2Start + atomjx4 + 3];
+
+			// shared math
+			rij2 = rijx * rijx + rijy * rijy + rijz * rijz;
+                        rij = Math.sqrt(rij2);
+                        
+                        double pairDerivs[] = ans[atomi][atomj];//Energy and derivatives for this atom pair
+							
+			if (isHeavy || useHydrogenEs) {
+				
+				// electrostatics only math
+				//tmpCoulFact = coulombFactor;
+                                double esCoeff = chargei * chargej * coulombFactor;
+				if (distDepDielect){ //distance-dependent dielectric
+                                    //electrostatic energy term is esCoeff/rij^2
+					//tmpCoulFact /= rij;
+                                    double term = esCoeff / rij2;
+                                    pairDerivs[0] += term;
+                                    pairDerivs[1] += -2*term/rij;
+                                    pairDerivs[2] += 6*term/rij2;
+                                }
+                                else {
+                                    //electrostatic energy term is esCoeff/rij
+                                    double term = esCoeff / rij;
+                                    pairDerivs[0] += term;
+                                    pairDerivs[1] += -esCoeff / rij2;
+                                    pairDerivs[2] += 2 * term / rij2;
+                                }
+				
+                                //esEnergy += (chargei * chargej * tmpCoulFact) / rij;
+			}
+
+			if (isHeavy || useHydrogenVdw) {
+				
+				// vdW only math
+				rij6 = rij2 * rij2 * rij2;
+				rij12 = rij6 * rij6;
+				
+				//vdwEnergy += Aij / rij12 - Bij / rij6;
+                                double repulsiveTerm = Aij / rij12;
+                                double attractiveTerm = Bij / rij6;
+                                pairDerivs[0] += repulsiveTerm - attractiveTerm;
+                                pairDerivs[1] += 6*attractiveTerm/rij - 12*repulsiveTerm/rij;
+                                pairDerivs[2] += 156*repulsiveTerm/rij2 - 42*attractiveTerm/rij2;
+			}
+		}
+
+		// The full nonbonded electrostatic terms are NOT scaled down by 1/1.2
+		coulombFactor = constCoulomb / (dielectric);
+		
+		// OPTIMIZATION: non-bonded terms usually far outnumber the other terms
+		ix5 = -5;
+		for(int i=0; i<numberNonBonded; i++) {
+			ix5 += 5;
+			
+			isHydrogen = nonBondedTerms[ix5 + 2] == 1;
+			if (isHydrogen && useHydrogenNeither) {
+				continue;
+			}
+			isHeavy = !isHydrogen;
+			
+			// read table parts
+			atomi = (int)nonBondedTerms[ix5];
+			atomj = (int)nonBondedTerms[ix5 + 1];
+			Aij = nonBondedTerms[ix5 + 3];
+			Bij = nonBondedTerms[ix5 + 4];
+			
+			// read coords
+			atomix4 = atomi * 4;
+			atomjx4 = atomj * 4;
+			rijx = data[res1Start + atomix4] - data[res2Start + atomjx4];
+			rijy = data[res1Start + atomix4 + 1] - data[res2Start + atomjx4 + 1];
+			rijz = data[res1Start + atomix4 + 2] - data[res2Start + atomjx4 + 2];
+			chargei = data[res1Start + atomix4 + 3];
+			chargej = data[res2Start + atomjx4 + 3];
+			
+			// shared math
+			rij2 = rijx * rijx + rijy * rijy + rijz * rijz;
+                        rij = Math.sqrt(rij2);
+                        
+                        double pairDerivs[] = ans[atomi][atomj];//Energy and derivatives for this atom pair
+							
+			if (isHeavy || useHydrogenEs) {
+				
+				// electrostatics only math
+				//tmpCoulFact = coulombFactor;
+                                double esCoeff = chargei * chargej * coulombFactor;
+				if (distDepDielect){ //distance-dependent dielectric
+                                    //electrostatic energy term is esCoeff/rij^2
+					//tmpCoulFact /= rij;
+                                    double term = esCoeff / rij2;
+                                    pairDerivs[0] += term;
+                                    pairDerivs[1] += -2*term/rij;
+                                    pairDerivs[2] += 6*term/rij2;
+                                }
+                                else {
+                                    //electrostatic energy term is esCoeff/rij
+                                    double term = esCoeff / rij;
+                                    pairDerivs[0] += term;
+                                    pairDerivs[1] += -esCoeff / rij2;
+                                    pairDerivs[2] += 2 * term / rij2;
+                                }
+				
+                                //esEnergy += (chargei * chargej * tmpCoulFact) / rij;
+			}
+
+			if (isHeavy || useHydrogenVdw) {
+				
+				// vdW only math
+				rij6 = rij2 * rij2 * rij2;
+				rij12 = rij6 * rij6;
+				
+				//vdwEnergy += Aij / rij12 - Bij / rij6;
+                                double repulsiveTerm = Aij / rij12;
+                                double attractiveTerm = Bij / rij6;
+                                pairDerivs[0] += repulsiveTerm - attractiveTerm;
+                                pairDerivs[1] += 6*attractiveTerm/rij - 12*repulsiveTerm/rij;
+                                pairDerivs[2] += 156*repulsiveTerm/rij2 - 42*attractiveTerm/rij2;
+			}
+		}
+		
+		// not doing solvation? we're done
+		if (!doSolvationE)
+			return ans;
+		
+		//--------------------------------------------
+		// compute solvation energies
+		//--------------------------------------------
+		// OPTIMIZATION: this used to be a separate function, but inlining it helps us go faster
+		
+		/*if (isInternal) {
+			solvEnergy += internalSolvEnergy;
+		}*/
+		
+		double lambda_i, vdWr_i, alpha_i;
+		double lambda_j, vdWr_j, alpha_j;
+		double Xij, Xji;
+		
+		ix8 = -8;
+		for (int i=0; i<numberSolvated; i++) {
+			ix8 += 8;
+			
+			// read the table parts
+			atomi = (int)solvationTerms[ix8];
+			atomj = (int)solvationTerms[ix8 + 4];
+                        
+                        double pairDerivs[] = ans[atomi][atomj];
+                        if(i==0 && isInternal)//need to put this somewhere, how about the first term
+                            pairDerivs[0] += internalSolvEnergy*solvScale;//doesn't depend on any distances
+			
+			// compute distance
+			atomix4 = atomi * 4;
+			atomjx4 = atomj * 4;
+			rijx = data[res1Start + atomix4] - data[res2Start + atomjx4];
+			rijy = data[res1Start + atomix4 + 1] - data[res2Start + atomjx4 + 1];
+			rijz = data[res1Start + atomix4 + 2] - data[res2Start + atomjx4 + 2];
+			rij2 = rijx * rijx + rijy * rijy + rijz * rijz;
+			
+			if (rij2 < solvCutoff2) {
+				
+				lambda_i = solvationTerms[ix8 + 1];
+				vdWr_i = solvationTerms[ix8 + 2];
+				alpha_i = solvationTerms[ix8 + 3];
+				
+				lambda_j = solvationTerms[ix8 + 5];
+				vdWr_j = solvationTerms[ix8 + 6];
+				alpha_j = solvationTerms[ix8 + 7];
+				
+				// OPTIMIZATION: something like 35% of our work is spent evaluating sqrts
+				rij = Math.sqrt(rij2);
+				Xij = (rij-vdWr_i)/lambda_i;
+				Xji = (rij-vdWr_j)/lambda_j;
+				
+				//solvEnergy -= (alpha_i*Math.exp(-Xij*Xij) + alpha_j*Math.exp(-Xji*Xji))/rij2;
+                                double expFac1 = alpha_i*Math.exp(-Xij*Xij);
+                                double expFac2 = alpha_j*Math.exp(-Xji*Xji);
+                                double rat = solvScale/rij2;
+                                pairDerivs[0] -= (expFac1 + expFac2) * rat;
+                                pairDerivs[1] += (2*Xij*expFac1/lambda_i + 2*Xji*expFac2/lambda_j) * rat;
+                                pairDerivs[1] += 2 * (expFac1 + expFac2) * rat/rij;
+                                pairDerivs[2] += (2*Xij*(-2*Xij+1)*expFac1/(lambda_i*lambda_i) + 2*Xji*(-2*Xji+1)*expFac2/(lambda_j*lambda_j)) * rat;
+                                pairDerivs[2] -= 4 * (2*Xij*expFac1/lambda_i + 2*Xji*expFac2/lambda_j) * rat / rij;
+                                pairDerivs[2] -= 6 * (expFac1 + expFac2) * rat/rij2;
+			}
+		}
+		
+		//solvEnergy *= solvScale;
+                return ans;
+	}
+        
+        
+        public Residue getRes1(){return res1;}
+        public Residue getRes2(){return res2;}
+        
 
 	//probably want to handle gradient at some point...below is from Amber96ext
 	//but we'll probably want to be returning the gradient from a particular term

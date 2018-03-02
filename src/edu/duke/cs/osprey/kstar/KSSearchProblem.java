@@ -1,5 +1,6 @@
 package edu.duke.cs.osprey.kstar;
 
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import java.math.BigInteger;
 import java.util.ArrayList;
 
@@ -33,11 +34,11 @@ public class KSSearchProblem extends SearchProblem {
 			ArrayList<ArrayList<String>> allowedAAs, boolean addWT, boolean contSCFlex, boolean useEPIC,
 			EPICSettings epicSettings, boolean useTupExp, LUTESettings luteSettings,
             DEEPerSettings dset, ArrayList<String[]> moveableStrands,
-			ArrayList<String[]> freeBBZones, boolean useEllipses, boolean useERef, boolean addResEntropy,
+			CATSSettings catsSettings, boolean useEllipses, boolean useERef, boolean addResEntropy,
 			boolean addWTRots, KSTermini termini, boolean useVoxelG) {
 		
 		super(name, PDBFile, flexibleRes, allowedAAs, addWT, contSCFlex, useEPIC, epicSettings, useTupExp, luteSettings,
-                        dset, moveableStrands, freeBBZones, useEllipses, useERef, addResEntropy, addWTRots, termini, useVoxelG, new ArrayList<>());
+                        dset, moveableStrands, catsSettings, useEllipses, useERef, addResEntropy, addWTRots, termini, useVoxelG, new ArrayList<>());
 		
 		this.allowedAAs = allowedAAs;
 		this.reducedAllowedAAs = allowedAAs;

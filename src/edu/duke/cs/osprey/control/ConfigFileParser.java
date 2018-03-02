@@ -4,6 +4,7 @@
  */
 package edu.duke.cs.osprey.control;
 
+import edu.duke.cs.osprey.bbfree.CATSSettings;
 import edu.duke.cs.osprey.confspace.SearchProblem;
 import edu.duke.cs.osprey.dof.deeper.DEEPerSettings;
 import edu.duke.cs.osprey.dof.deeper.RamachandranChecker;
@@ -75,6 +76,16 @@ public class ConfigFileParser {
         return dset;
     }
     
+    public CATSSettings setupCATS(){
+        return new CATSSettings(
+            freeBBZoneTermini(),
+            params.getBool("BFBFixAnchors",true),
+            params.getBool("BFBTooBigForSeries",false),
+            params.getDouble("BFBVoxelWidth",0.)
+        );
+        //freeBBZones, boolean fixAnchors, boolean tooBigForSeries, double voxWidth
+    }
+    
     
     private ArrayList<String[]> freeBBZoneTermini(){
         //Read the termini of the BBFreeBlocks, if any
@@ -136,7 +147,6 @@ public class ConfigFileParser {
         System.out.println("CREATING SEARCH PROBLEM.  NAME: "+name);
         
         ArrayList<String[]> moveableStrands = moveableStrandTermini();
-        ArrayList<String[]> freeBBZones = freeBBZoneTermini();
         DEEPerSettings dset = setupDEEPer();
         
         SearchProblem search = new SearchProblem( name, params.getValue("PDBNAME"), 
@@ -147,7 +157,7 @@ public class ConfigFileParser {
                 new EPICSettings(params),
                 params.getBool("UseTupExp"),
                 new LUTESettings(params),
-                dset, moveableStrands, freeBBZones,
+                dset, moveableStrands, setupCATS(),
                 params.getBool("useEllipses"),
                 params.getBool("useERef"),
                 params.getBool("AddResEntropy"),
@@ -158,6 +168,8 @@ public class ConfigFileParser {
         );
         
         search.numEmatThreads = params.getInt("EmatThreads");
+        
+        SearchProblem.testPLUGTuples = params.getBool("TESTPLUGTUPLES", false);//DEBUG!!
         
         return search;
     }
@@ -345,6 +357,8 @@ public class ConfigFileParser {
                 curForcefieldParams,
                 params.getDouble("SHELLDISTCUTOFF"),
                 usePoissonBoltzmann );
+        
+        EnvironmentVars.pbUseAux = params.getBool("PBUSEAUX",true);
         
         String[] resTemplateFiles = getResidueTemplateFiles(curForcefieldParams.forcefld);
         

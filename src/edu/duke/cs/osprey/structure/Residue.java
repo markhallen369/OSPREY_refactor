@@ -315,6 +315,15 @@ public class Residue implements Serializable {
         return -1;
     }
     
+    public Atom getAtomByName(String n){
+        for (Atom atom : atoms) {
+            if (atom.name.equalsIgnoreCase(n)) {
+                return atom;
+            }   
+        }
+        return null;
+    }
+    
     public double[] getCoordsByAtomName(String n){
         //return coordinates of atom named n
         //return null if there is none

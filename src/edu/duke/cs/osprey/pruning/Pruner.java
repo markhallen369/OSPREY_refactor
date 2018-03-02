@@ -15,6 +15,7 @@ import edu.duke.cs.osprey.confspace.TupleEnumerator;
 import edu.duke.cs.osprey.ematrix.EnergyMatrix;
 import edu.duke.cs.osprey.ematrix.epic.EPICMatrix;
 import edu.duke.cs.osprey.pruning.PruningMethod.CheckSumType;
+import edu.duke.cs.osprey.structure.Residue;
 
 /**
  *
@@ -42,6 +43,7 @@ public class Pruner {
     EnergyMatrix emat;//energy matrix to prune based on
     EPICMatrix epicMat;//EPIC matrix to go with emat, if applicable
     ConfSpace confSpace;//Conformation space over which these matrices are defined
+    ArrayList<Residue> shellResidues;
     
     TupleEnumerator tupEnum;//use to enumerate candidate RC tuples, etc.
     
@@ -86,7 +88,8 @@ public class Pruner {
             //EPIC is meant to be added to pairwise lower-bound energy
             throw new RuntimeException("ERROR: Can't prune with both EPIC and tup-exp at the same time");
         
-        tupEnum = new TupleEnumerator(pruneMat, emat, searchSpace.confSpace.numPos);
+        tupEnum = new TupleEnumerator(pruneMat, emat, null, searchSpace.confSpace.numPos);
+        shellResidues = searchSpace.shellResidues;
     }
     
     public void setVerbose(boolean val) {
@@ -125,7 +128,7 @@ public class Pruner {
                 
                 double contELB = 0;
                 if(useEPIC && cand.pos.size()>1)//EPIC gives us nothing for 1-pos pruning
-                    contELB = epicMat.minContE(cand);
+                    contELB = epicMat.minimizeEnergy(cand,false,false,null,1);
                 
                 // skip candidates we've already pruned
                 if (pruneMat.isPruned(cand)) {
@@ -544,6 +547,35 @@ public class Pruner {
                 System.out.println("Pruned "+numPruned+" in "+numBodies+"-body steric pruning");
         }
     }
+    
+    
+    /*public void pruneGeometric(){
+        //Prune 1- and 2-body terms with unfavorable local geometry
+        //DEBUG!! actually should compute mtx first and do this with intra terms included
+        //since constraints can be intersected
+        
+        if(verbose)
+            System.out.println("Starting geometric pruning.");
+        
+        for(int numBodies=1; numBodies<=2; numBodies++){
+            int numPruned = 0;
+            
+            ArrayList<RCTuple> candList = tupEnum.enumerateUnprunedTuples(numBodies);
+            for(RCTuple cand : candList){
+                RCPairVDWChecker checker = new RCPairVDWChecker(confSpace, cand, shellResidues);
+                if( ! checker.checkVDW() ){//geometric pruning only, no polytope storage
+                    pruneMat.markAsPruned(cand);
+                    numPruned++;
+                    System.out.println("Geometrically pruned "+cand.stringListing());
+                }
+                else
+                    System.out.println("Didn't geometrically prune "+cand.stringListing());
+            }
+            
+            if(verbose)
+                System.out.println("Pruned "+numPruned+" in "+numBodies+"-body geometric pruning");
+        }
+    }*/
 
     
     

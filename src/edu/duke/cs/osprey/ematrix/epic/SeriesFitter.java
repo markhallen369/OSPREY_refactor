@@ -60,6 +60,7 @@ import cern.colt.matrix.DoubleMatrix2D;
 import cern.colt.matrix.linalg.Algebra;
 import cern.colt.matrix.linalg.SingularValueDecomposition;
 import cern.jet.math.Functions;
+import edu.duke.cs.osprey.tools.ObjectIO;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -109,7 +110,8 @@ public class SeriesFitter {
 
         int numSamples = samp.length;
 
-        System.out.println("Fit has "+numSamples+" samples for "+numParams+" parameters");
+        if(EPICFitter.verbose)
+            System.out.println("Fit has "+numSamples+" samples for "+numParams+" parameters");
 
 
         if(c==null)
@@ -163,11 +165,18 @@ public class SeriesFitter {
         //long MCTime = System.currentTimeMillis();
         //System.out.println("fitSeries M, C calc time (ms): "+(MCTime-setupDoneTime));
 
+        //slight regularization should clear singularities
+        //and avoids an apparent bug in colt where SVD hangs
+        for(int i=0; i<M.rows(); i++)
+            M.set(i, i, M.get(i,i)+1e-8);
+            
+        double v[] = Algebra.DEFAULT.solve(M,C).viewColumn(0).toArray();
+        /*
         double[] v = null;//the best-fit parameters, as a column vector
         try {
             v = Algebra.DEFAULT.solve(M,C).viewColumn(0).toArray();
         }
-        catch(IllegalArgumentException e){//indices singular M
+        catch(IllegalArgumentException e){//indicates singular M
             //solve in a way robust to singularities
             //basically pseudoinverse(M)*C
             SingularValueDecomposition svd = new SingularValueDecomposition(M);
@@ -195,7 +204,7 @@ public class SeriesFitter {
             //DoubleMatrix2D checkC = Algebra.DEFAULT.mult(M, ansCol);
             
             v = ansCol.viewColumn(0).toArray();
-        }
+        }*/
 
         //long vTime = System.currentTimeMillis();
         //System.out.println("fitSeries matrix solution time (ms): "+(vTime-MCTime));
@@ -242,13 +251,15 @@ public class SeriesFitter {
             }
 
             meanResidual /= weightSum;
-            System.out.println("TRAINING SET MEAN RESIDUAL:"+meanResidual);
+            if(EPICFitter.verbose)
+                System.out.println("TRAINING SET MEAN RESIDUAL:"+meanResidual);
         }
 
 
         long doneTime = System.currentTimeMillis();
         //System.out.println("fitSeries checking time (ms): "+(doneTime-vTime));
-        System.out.println("fitSeries time (ms): "+(doneTime-startTime));
+        if(EPICFitter.verbose)
+            System.out.println("fitSeries time (ms): "+(doneTime-startTime));
 
         return v;
     }
@@ -267,7 +278,8 @@ public class SeriesFitter {
             int PCOrder, boolean isPC[]){
         
         long startTime = System.currentTimeMillis();
-        System.out.println("Starting fitSeriesIterative...");
+        if(EPICFitter.verbose)
+            System.out.println("Starting fitSeriesIterative...");
 
 
         int numSamples = samp.length;
@@ -568,7 +580,7 @@ public class SeriesFitter {
 
             meanResidual /= weightSum;
 
-            if(meanResidual==prevResid)
+            if(meanResidual==prevResid && EPICFitter.verbose)
                 System.out.println();
 
 
@@ -609,13 +621,13 @@ public class SeriesFitter {
                 //Did not obtain a decrease using the Newton step
                 //Let's do an exact line search to rectify the situation
 
-                if(!useLineSearch){
+                if(!useLineSearch && EPICFitter.verbose){
                     System.out.println("Skipping line search, returning with residual "+prevResid);
                     return oldCoeffs;
                 }
                 
-                
-                System.out.println("LINE SEARCH");
+                if(EPICFitter.verbose)
+                    System.out.println("LINE SEARCH");
                 
                 
                 for(int s=0; s<numSamples; s++){
@@ -810,10 +822,12 @@ public class SeriesFitter {
                     //NOTE THIS CAN HAPPEN IF THE QUADRATIC APPROXIMATION AT OLDCOEFFS HAS SOLUTION
                     //FAR FROM THE EXACT VALUE (ASSUMING EXACT FITSERIES) OF 1
                     //THIS CAN HAPPEN IF WE'RE GETTING BELOW THE NUMERICAL PRECISION OF FITSERIES
-                    System.out.println("TRAINING SET MEAN RESIDUAL:"+prevResid);
-                    System.out.println("CONVERGED IN LINE SEARCH, line search min: "+minResid);
-                    System.out.println("fitSeriesIterative time (ms): "+(System.currentTimeMillis()-startTime));
-
+                    if(EPICFitter.verbose){
+                        System.out.println("TRAINING SET MEAN RESIDUAL:"+prevResid);
+                        System.out.println("CONVERGED IN LINE SEARCH, line search min: "+minResid);
+                        System.out.println("fitSeriesIterative time (ms): "+(System.currentTimeMillis()-startTime));
+                    }
+                    
                     return oldCoeffs;
                 }
 
@@ -871,14 +885,16 @@ public class SeriesFitter {
 */
 
             oldCoeffs = coeffs;
-            System.out.println("STEP RESIDUAL: "+meanResidual);
+            if(EPICFitter.verbose)
+                System.out.println("STEP RESIDUAL: "+meanResidual);
             prevResid = meanResidual;
             oldSerVals = serVals;
         }
 
-        System.out.println("TRAINING SET MEAN RESIDUAL:"+meanResidual);
-        System.out.println("fitSeriesIterative time (ms): "+(System.currentTimeMillis()-startTime));
-
+        if(EPICFitter.verbose){
+            System.out.println("TRAINING SET MEAN RESIDUAL:"+meanResidual);
+            System.out.println("fitSeriesIterative time (ms): "+(System.currentTimeMillis()-startTime));
+        }
         
         
         
@@ -1426,7 +1442,7 @@ public class SeriesFitter {
     //This method calculates the contribution of a given sample to the coefficients in this linear fit
     //for each parameter
     //nd = number of dimensions
-    static void calcSampParamCoeffs(DoubleMatrix1D v, DoubleMatrix1D sample, int nd, 
+    public static void calcSampParamCoeffs(DoubleMatrix1D v, DoubleMatrix1D sample, int nd, 
             boolean includeConst, int order, int PCOrder, boolean isPC[]){
 
         if(order<1||order>6||PCOrder>6){

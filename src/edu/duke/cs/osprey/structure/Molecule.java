@@ -65,6 +65,17 @@ public class Molecule implements Serializable {
     }
     
     
+    public Residue getResByFullName(String name){
+        
+        for(Residue res : residues){
+            if(res.fullName.equalsIgnoreCase(name))
+                return res;
+        }
+        
+        throw new RuntimeException("ERROR: Can't find residue in molecule with full name "+name);
+    }
+    
+    
     public void appendResidue(Residue res){
         //Add a residue to the end of the molecule
         res.indexInMolecule = residues.size();

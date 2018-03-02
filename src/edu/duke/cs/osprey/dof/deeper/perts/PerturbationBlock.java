@@ -16,6 +16,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 
@@ -232,6 +233,11 @@ public class PerturbationBlock implements Serializable, DOFBlock {
         copiedBlock.allResidues = Residue.equivalentInMolec(allResidues, mol);
     
         return copiedBlock;
+    }
+
+    @Override
+    public List<Residue> listResidues() {
+        return allResidues;
     }
     
 }

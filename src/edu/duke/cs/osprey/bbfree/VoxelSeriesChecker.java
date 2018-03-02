@@ -44,9 +44,12 @@ public class VoxelSeriesChecker {
 
     DoubleMatrix1D freeDOFCenter;
     
+    boolean fixAnchors;
+    boolean useDistSqrt;
+    
     public VoxelSeriesChecker(List<Residue> residues, int numFreeDOFs, int numFullDOFs, 
             double[][] fullDOFPolys, PepPlaneLinModel[] pepPlanes, DoubleMatrix2D freeDOFMatrix,
-            DoubleMatrix1D freeDOFCenter
+            DoubleMatrix1D freeDOFCenter, boolean fixAnchors, boolean useDistSqrt
     ) {
         //to be called in init conf!!
         numRes = residues.size();
@@ -56,6 +59,8 @@ public class VoxelSeriesChecker {
         this.pepPlanes = pepPlanes;
         this.freeDOFMatrix = freeDOFMatrix;
         this.freeDOFCenter = freeDOFCenter;
+        this.fixAnchors = fixAnchors;
+        this.useDistSqrt = useDistSqrt;
         
         NCoord = new double[numRes][];
         CACoord = new double[numRes][];
@@ -95,24 +100,24 @@ public class VoxelSeriesChecker {
         int fullDOFCount = 0;
         DoubleMatrix1D fullDOFVals = DoubleFactory1D.dense.make(numFullDOFs);
         
-        for(int resNum=1; resNum<numRes; resNum++){
+        for(int resNum=0; resNum<numRes; resNum++){
             
-            for(int dim=0; dim<3; dim++){
-                NCoord[resNum][dim] = evalFullDOF(fullDOFCount,sampFreeDOFs);
-                fullDOFVals.set(fullDOFCount, NCoord[resNum][dim]);
-                fullDOFCount++;
+            if(resNum>0){//N not a free atom in first res
+                for(int dim=0; dim<3; dim++){
+                    NCoord[resNum][dim] = evalFullDOF(fullDOFCount,sampFreeDOFs);
+                    fullDOFVals.set(fullDOFCount, NCoord[resNum][dim]);
+                    fullDOFCount++;
+                }
             }
             
-            if(resNum==numRes-1)//no CA variables
-                break;
-            
-            for(int dim=0; dim<3; dim++){
-                CACoord[resNum][dim] = evalFullDOF(fullDOFCount,sampFreeDOFs);
-                fullDOFVals.set(fullDOFCount, CACoord[resNum][dim]);
-                fullDOFCount++;
+            //CA's at end residues can't move if fixAnchors
+            if( (!fixAnchors) || (resNum>0&&resNum<numRes-1) ){
+                for(int dim=0; dim<3; dim++){
+                    CACoord[resNum][dim] = evalFullDOF(fullDOFCount,sampFreeDOFs);
+                    fullDOFVals.set(fullDOFCount, CACoord[resNum][dim]);
+                    fullDOFCount++;
+                }
             }
-            
-            
         }
         
         //Once N and CA in place, can calc C'.  Use plane projection, to match constr in jac
@@ -123,14 +128,20 @@ public class VoxelSeriesChecker {
         
         //OK now handle add up constraint resids!
         ArrayList<Double> sampConstraintVals = calcConstraintVals();
+        List<Double> constrTarget = targetConstraintVals;
+        //DEBUG!!!!!!!
+        //sampConstraintVals = calcPepPlaneConstraintVals(2);
+        //constrTarget = targetConstraintVals.subList(8, 11);
+        
+        int numConstr = sampConstraintVals.size();
         
         double constrResid = 0;
-        for(int c=0; c<numFullDOFs-numFreeDOFs; c++){
-            double dev = sampConstraintVals.get(c) - targetConstraintVals.get(c);
+        for(int c=0; c<numConstr; c++){
+            double dev = sampConstraintVals.get(c) - constrTarget.get(c);
             constrResid += dev*dev;
         }
         
-        constrResid /= (numFullDOFs-numFreeDOFs);//normalize resid by # of constraints
+        constrResid /= numConstr;//normalize resid by # of constraints
         
         
         DoubleMatrix1D freeDOFsCheck = Algebra.DEFAULT.mult(freeDOFMatrix, fullDOFVals);
@@ -150,17 +161,43 @@ public class VoxelSeriesChecker {
         
         for(int resNum=0; resNum<numRes; resNum++){
             if(resNum>0){//peptide plane distance constrs
-                ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum]) );
-                ans.add( VectorAlgebra.distance(CACoord[resNum-1], CACoord[resNum]) );
-                ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum-1]) );
+                if(useDistSqrt){
+                    ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum]) );
+                    ans.add( VectorAlgebra.distance(CACoord[resNum-1], CACoord[resNum]) );
+                    ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum-1]) );
+                }
+                else {
+                    ans.add( VectorAlgebra.distsq(NCoord[resNum], CACoord[resNum]) );
+                    ans.add( VectorAlgebra.distsq(CACoord[resNum-1], CACoord[resNum]) );
+                    ans.add( VectorAlgebra.distsq(NCoord[resNum], CACoord[resNum-1]) );
+                }
             }
             
-            ans.add( VectorAlgebra.dot( VectorAlgebra.subtract(NCoord[resNum], CACoord[resNum]),
-                    VectorAlgebra.subtract(CCoord[resNum], CACoord[resNum]) ) );
+            if(fixAnchors||(resNum>0&&resNum<numRes-1)){
+                if(useDistSqrt && resNum>0 && resNum<numRes-1){
+                    ans.add( VectorAlgebra.distance(NCoord[resNum], CCoord[resNum]) );
+                }
+                else {
+                    ans.add( VectorAlgebra.dot( VectorAlgebra.subtract(NCoord[resNum], CACoord[resNum]),
+                            VectorAlgebra.subtract(CCoord[resNum], CACoord[resNum]) ) );
+                }
+            }
         }
         
         return ans;
     }
+    
+    
+    /*private ArrayList<Double> calcPepPlaneConstraintVals(int pepPlaneNum){
+        ArrayList<Double> ans = new ArrayList<>();
+        
+        int resNum = pepPlaneNum+1;
+        ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum]) );
+        ans.add( VectorAlgebra.distance(CACoord[resNum-1], CACoord[resNum]) );
+        ans.add( VectorAlgebra.distance(NCoord[resNum], CACoord[resNum-1]) );
+       
+        return ans;
+    }*/
     
     
     private double evalFullDOF(int fullDOF, DoubleMatrix1D sampFreeDOFs){

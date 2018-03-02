@@ -13,6 +13,9 @@ import edu.duke.cs.osprey.confspace.TupleMatrixGeneric;
 import edu.duke.cs.osprey.minimization.CCDMinimizer;
 import edu.duke.cs.osprey.minimization.Minimizer;
 import edu.duke.cs.osprey.minimization.MoleculeModifierAndScorer;
+import edu.duke.cs.osprey.minimization.PLUGEnhancedMinimizer;
+import edu.duke.cs.osprey.minimization.SQPMinimizer;
+import edu.duke.cs.osprey.plug.PolytopeMatrix;
 
 /**
  *
@@ -33,7 +36,73 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
     }
     
     
-   public double minContE(RCTuple RCTup){
+    public double minimizeEnergy(RCTuple RCTup, boolean useSQP, boolean includeMinE,
+            PolytopeMatrix plugMat, int numConsistent){
+        //Minimize EPIC energy for the tuple
+        //return infinity if the tuple is pruned
+        //If plugMat is not null then use the PLUGEnhancedMinimizer
+        
+       
+        if( useSQP && plugMat!=null )
+            throw new RuntimeException("ERROR: PLUG-enhanced SQP minimizer not currently available");
+        if( numConsistent!=1 && plugMat==null )
+            throw new RuntimeException("ERROR: numConsistent is for PLUGEnhancedMinimizer");
+        
+        //137DEBUG!!!  seeing if min taking too long
+        long startTime = System.currentTimeMillis();
+        
+        EPICEnergyFunction efunc = internalEnergyFunction(RCTup,includeMinE);
+        
+        //137DEBUG!!
+        long gotEFcnTime = System.currentTimeMillis()-startTime;
+        
+        if(efunc==null)//pruned!
+            return Double.POSITIVE_INFINITY;
+        
+        MoleculeModifierAndScorer objFcn = new MoleculeModifierAndScorer(efunc,confSpace,RCTup);
+        
+        Minimizer minim;
+        if(useSQP)
+            minim = new SQPMinimizer(objFcn,null);
+        else if(plugMat!=null)
+            minim = new PLUGEnhancedMinimizer(objFcn,plugMat,RCTup,numConsistent);
+        else
+            minim = new CCDMinimizer(objFcn,false);
+        
+        
+        //137DEBUG!!
+        long preMinTime = System.currentTimeMillis()-startTime;
+        
+        
+        DoubleMatrix1D bestDOFVals = minim.minimize().dofValues;
+        double E = objFcn.getValue(bestDOFVals);
+        
+        //137DEBUG!!!
+        long sampTime = System.currentTimeMillis() - startTime;
+        //taking over 10 s is going to be an issue
+        if(sampTime > 10000){
+            System.out.println();
+            System.out.println("Minimization took over 10 s (ms shown): "+sampTime);
+            System.out.println("Time to get E Fcn: "+gotEFcnTime+" to start min: "+preMinTime);
+            System.out.println("Sample: "+RCTup.stringListing());
+            System.out.println("Energy: "+E);
+            if(minim instanceof CCDMinimizer){
+                CCDMinimizer ccdMin = (CCDMinimizer)minim;
+
+                System.out.println("GVCounts.  Estmin: "+ccdMin.GVCountEstmin+" Edge: "+ccdMin.GVCountEdge
+                        +" Bigger: "+ccdMin.GVCountBigger+" Smaller: "+ccdMin.GVCountSmaller);
+            }
+            
+            System.out.println();
+        }
+                
+        return E;
+    }
+    
+    
+    
+    
+    /*public double minContE(RCTuple RCTup, boolean useSQP){
         //compute the minimized continuous component of the energy for the specified tuple
         //(i.e., conformationally minimized sum of EPIC term values, without minE)
         //return infinity if the tuple is pruned
@@ -55,7 +124,11 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
         
         MoleculeModifierAndScorer objFcn = new MoleculeModifierAndScorer(efunc,confSpace,RCTup);
         
-        Minimizer minim = new CCDMinimizer(objFcn,false);
+        Minimizer minim;
+        if(useSQP)
+            minim = new SQPMinimizer(objFcn,null);
+        else
+            minim = new CCDMinimizer(objFcn,false);
         
         
         //137DEBUG!!
@@ -66,6 +139,17 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
         DoubleMatrix1D bestDOFVals = minim.minimize().dofValues;
         double E = objFcn.getValue(bestDOFVals);
         
+        //DEBUG!!!!
+        /*Minimizer ccdMin = new CCDMinimizer(objFcn,false);
+        DoubleMatrix1D ccdDOFVals = ccdMin.minimize().dofValues;
+        System.out.println("Energy track");
+        for(int a=0; a<=20; a++){
+            double frac = a/20.;
+            DoubleMatrix1D x = bestDOFVals.copy().assign(Functions.mult(1-frac)).assign(ccdDOFVals,Functions.plusMult(frac));
+            System.out.println(objFcn.getValue(x));
+        }
+        System.out.println("Energy track done");*/
+        
         //DEBUG!!!!!!!!
         /*String objFcnFile = "OBJFCN"+System.currentTimeMillis()+".dat";
         ObjectIO.writeObject(objFcn, objFcnFile);
@@ -73,7 +157,7 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
         */
         
         //137DEBUG!!!
-        long sampTime = System.currentTimeMillis() - startTime;
+       /* long sampTime = System.currentTimeMillis() - startTime;
         //taking over 10 s is going to be an issue
         if(sampTime > 10000){
             System.out.println();
@@ -81,10 +165,12 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
             System.out.println("Time to get E Fcn: "+gotEFcnTime+" to start min: "+preMinTime);
             System.out.println("Sample: "+RCTup.stringListing());
             System.out.println("Energy: "+E);
-            CCDMinimizer ccdMin = (CCDMinimizer)minim;
-            
-            System.out.println("GVCounts.  Estmin: "+ccdMin.GVCountEstmin+" Edge: "+ccdMin.GVCountEdge
-                    +" Bigger: "+ccdMin.GVCountBigger+" Smaller: "+ccdMin.GVCountSmaller);
+            if(minim instanceof CCDMinimizer){
+                CCDMinimizer ccdMin = (CCDMinimizer)minim;
+
+                System.out.println("GVCounts.  Estmin: "+ccdMin.GVCountEstmin+" Edge: "+ccdMin.GVCountEdge
+                        +" Bigger: "+ccdMin.GVCountBigger+" Smaller: "+ccdMin.GVCountSmaller);
+            }
             
             System.out.println();
         }
@@ -95,15 +181,19 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
     }
    
     public double minContE(int[] conf){
+        return minContE(conf,false);//CCD by default for now
+    }
+   
+    public double minContE(int[] conf, boolean useSQP){
         ////Given a list of RCs for each position, compute the minimized cont component of the energy
         //negative RC numbers indicate undefined positions 
         //(exclude these positions: EPIC terms always positive, so this gives
         //a valid lower bound).  again, return infinity if conf pruned
-        return minContE(new RCTuple(conf));
-    }
+        return minContE(new RCTuple(conf), useSQP);
+    }*/
     
     
-    public EPICEnergyFunction internalEnergyFunction(RCTuple tup){
+    public EPICEnergyFunction internalEnergyFunction(RCTuple tup, boolean includeMinE){
         //Make an energy function representing the internal energy of the tuple
         //kind of an EPIC analog of EnergyMatrix.getInternalEnergy
         //return null if the tuple is pruned
@@ -141,7 +231,7 @@ public class EPICMatrix extends TupleMatrixGeneric<EPoly> {
             }
         }
         
-        EPICEnergyFunction efunc = new EPICEnergyFunction(terms);
+        EPICEnergyFunction efunc = new EPICEnergyFunction(terms, includeMinE);
         return efunc;
     }
 

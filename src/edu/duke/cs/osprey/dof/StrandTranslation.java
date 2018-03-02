@@ -48,4 +48,11 @@ public class StrandTranslation extends DegreeOfFreedom {
     public DOFBlock getBlock(){
         return strand;
     }
+    
+    
+        @Override
+    public String getName() {
+        return "STRTRANS"+strand.res.get(0).getPDBResNumber()+"."+coordNum;
+    }
+
 }

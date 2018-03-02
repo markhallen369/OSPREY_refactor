@@ -32,7 +32,8 @@ public class BBFreeDOF extends DegreeOfFreedom {
     public void apply(double paramVal) {
         double[] newDOFVals = block.curFreeDOFVals.clone();
         newDOFVals[indexInBlock] = paramVal;
-        block.setDOFs(DoubleFactory1D.dense.make(newDOFVals));
+        if(!block.setDOFs(DoubleFactory1D.dense.make(newDOFVals)))
+            throw new RuntimeException("ERROR: Failed to set BB free DOFs");
     }
     
     
@@ -44,5 +45,10 @@ public class BBFreeDOF extends DegreeOfFreedom {
     @Override
     public DOFBlock getBlock(){
         return block;
+    }        
+    
+    @Override
+    public String getName() {
+        return "CATS"+block.residues.get(0).getPDBResNumber()+"."+indexInBlock;
     }
 }

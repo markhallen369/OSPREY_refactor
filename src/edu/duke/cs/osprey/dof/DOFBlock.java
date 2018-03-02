@@ -6,7 +6,9 @@
 package edu.duke.cs.osprey.dof;
 
 import edu.duke.cs.osprey.structure.Molecule;
+import edu.duke.cs.osprey.structure.Residue;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 /**
  * 
@@ -19,5 +21,8 @@ public interface DOFBlock {
     //Make a copy of the block that operates in a new molecule, mol.  
     //For each DOF in the block, add an entry (DOF -> copy of DOF) to copiedDOFMap
     public DOFBlock copyForNewMolecule(Molecule mol, LinkedHashMap<DegreeOfFreedom, DegreeOfFreedom> copiedDOFMap);
+    
+    public List<Residue> listResidues();//residues affected by the DOFs in the block
+    
     
 }

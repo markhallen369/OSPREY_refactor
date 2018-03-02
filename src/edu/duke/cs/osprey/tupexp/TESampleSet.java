@@ -4,7 +4,11 @@
  */
 package edu.duke.cs.osprey.tupexp;
 
+import cern.colt.matrix.DoubleFactory1D;
 import edu.duke.cs.osprey.confspace.RCTuple;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -41,10 +45,33 @@ public class TESampleSet implements Serializable {
     
     TupleExpander te;
     
+    
+        
+    static boolean rejectInf = false;//DEBUG!!!!
+    //This is for cases like minimization w/ PLUG
+    //where we expect some samples, even in the "unpruned" space, to be infinite
+    //we will not fit to these--treating them as energy not reliably calculable, as
+    //cannot effectively calculate their energy in the all-res PLUG model
+    //hence rejected as samples, and will need to ezprune tuples that always come up inf 
+    //(since cannot identify such samples efficiently and provably--DFS could be prohibitive)
+    //TURNING OFF NOW TO DO DFS WITH PLUG ACCOUNTED FOR
+    static int rejectInfNumTries = 10;//number of tries for such tuples
+    
+    
+    private boolean blankScoreMode = false;//when this is turned on, sample scores are not computed
+    //and added to trueVal.  They thus need to be computed all at once later.  
+    //Useful for parallelism and resumability.  
+    
+    
         
     public TESampleSet(TupleExpander te) {
+        this(te,false);
+    }
+    
+    public TESampleSet(TupleExpander te, boolean blankScoreMode){
         
         this.te = te;
+        this.blankScoreMode = blankScoreMode;
         
         //allocate sample arrays for each term...
         for( RCTuple tup : te.tuples ){
@@ -64,7 +91,7 @@ public class TESampleSet implements Serializable {
     
        
     
-    void updateSamples(int tup){
+    public void updateSamples(int tup){
         //We just raised created or raised the order of approximation for the given tuple terms
         //we need to create more samples for it
         
@@ -82,9 +109,12 @@ public class TESampleSet implements Serializable {
             if( ! isNewSampleDistinct(sample) )
                 continue;
             
-            double trueVal = te.scoreAssignmentList(sample);
+            if(!blankScoreMode){
+                double trueVal = te.scoreAssignmentList(sample);
+                trueVals.add(trueVal);
+            }
             
-            
+                        
             ArrayList<Integer> sampTuples = calcSampleTuples(sample);
             sampTuples.trimToSize();
 
@@ -101,7 +131,6 @@ public class TESampleSet implements Serializable {
                 tupleNumSamples.set( term, tupleNumSamples.get(term)+1 );
             }
 
-            trueVals.add(trueVal);
             curFitVals.add(0.);//to be replaced by updateFitVal
         }
     }
@@ -133,7 +162,7 @@ public class TESampleSet implements Serializable {
     }
     
             
-    boolean tupleFeasible(RCTuple tup){
+    public boolean tupleFeasible(RCTuple tup){
         int sample[] = drawUnprunedSample(tup, false);
         return (sample!=null);//were we able to draw a sample?
     }
@@ -161,18 +190,27 @@ public class TESampleSet implements Serializable {
             for(int a=0; a<te.numAllowed[nextPos]; a++){
                 distr[a] = 1;
                 
-                if(te.isPruned(new RCTuple(nextPos, a)))
-                    distr[a] = 0;
                 
-                //look for pruned pairs between a and assignments already in sample
-                for(int pos=0; pos<te.numPos; pos++){
-                    if(sample[pos]!=-1){
-                        
-                        if(isPairPrunedInSample(pos, sample[pos], nextPos, a, sample)){
-                            distr[a] = 0;
-                            break;
+                if(te.canCheckPartialPruning){
+                    if(te.isPruned(new RCTuple(nextPos, a)))
+                        distr[a] = 0;
+
+                    //look for pruned pairs between a and assignments already in sample
+                    for(int pos=0; pos<te.numPos; pos++){
+                        if(sample[pos]!=-1){
+
+                            if(isPairPrunedInSample(pos, sample[pos], nextPos, a, sample)){
+                                distr[a] = 0;
+                                break;
+                            }
                         }
                     }
+                }
+                else {
+                    int augSamp[] = sample.clone();
+                    augSamp[nextPos] = a;
+                    if(te.isPruned(new RCTuple(augSamp)))
+                        distr[a] = 0;
                 }
                 
                 
@@ -217,7 +255,7 @@ public class TESampleSet implements Serializable {
         for(int a : distr)
             tot += a;
         
-        int randVal = new java.util.Random().nextInt(tot);
+        int randVal = rand.nextInt(tot);//new java.util.Random().nextInt(tot);
         int cumSum = 0;
         
         for(int ans=0; ans<distr.length; ans++){
@@ -290,7 +328,7 @@ public class TESampleSet implements Serializable {
     
     
     
-    void addTuple(int tup){
+    public void addTuple(int tup){
         //add a tuple that has just been put into TupleExpander, updating samples accordingly
         //tup will be tuples.size()-1
         
@@ -320,9 +358,34 @@ public class TESampleSet implements Serializable {
     }
     
     
-    
-    
     int[] drawUnprunedSample(RCTuple tup, boolean errorIfImpossible){
+        if(rejectInf){
+            for(int tryNum=0; (tryNum<rejectInfNumTries || errorIfImpossible); tryNum++){
+                //can cut off at finite num tries if seeing if good conf exists
+                //but once determined one does and drawing real samples (errorIfImpossible), need to keep trying til find one
+                int[] draw = drawUnprunedSampleNoEval(tup,errorIfImpossible);
+                
+
+                
+                
+                if(draw==null)//no unpruned sample possible
+                    return null;
+                else {
+                    if(!isNewSampleDistinct(draw))//drawn before, therefore has finite energy (note: currently tossing these duplicates)
+                        return draw;
+                    double E = te.scoreAssignmentList(draw);
+                    if(Double.isFinite(E))
+                        return draw;
+                }
+            }
+            return null;//couldn't find finite-energy sample
+        }
+        else
+            return drawUnprunedSampleNoEval(tup,errorIfImpossible);
+    }
+    
+    
+    int[] drawUnprunedSampleNoEval(RCTuple tup, boolean errorIfImpossible){
         //draw an unpruned sample containing the specified tuple
         //errorIfImpossible means we expect this to be possible, and should throw an error if it isn't
         //(return null if impossible and no error)
@@ -466,7 +529,17 @@ public class TESampleSet implements Serializable {
                         
                         for(int q=allowedRCs.get(pos).size()-1; q>=0; q--){//reverse iteration to allow deletion
                             int[] uaOpt = allowedRCs.get(pos).get(q);
-                            if(isPairPrunedInSample(nextPos,opt,uaOpt[0],uaOpt[1],sample)){
+                            
+                            boolean pruned;
+                            if(te.canCheckPartialPruning)
+                                pruned = isPairPrunedInSample(nextPos,opt,uaOpt[0],uaOpt[1],sample);
+                            else {
+                                int augSamp[] = sample.clone();
+                                augSamp[uaOpt[0]] = uaOpt[1];
+                                pruned = te.isPruned(new RCTuple(augSamp));
+                            }
+                                
+                            if(pruned){
                                 elimHere.add(uaOpt);
                                 allowedRCs.get(pos).remove(q);
                                 numElim.set( pos, numElim.get(pos)+1 );
@@ -515,13 +588,20 @@ public class TESampleSet implements Serializable {
                     if(!te.isPruned(new RCTuple(pos,rc))){
 
                         boolean incompatible = false;
-                        for(int pos2=0; pos2<te.numPos; pos2++){
-                            if(sample[pos2]!=-1){//pos2 assigned
-                                if(isPairPrunedInSample(pos2,sample[pos2],pos,rc,sample)){
-                                    incompatible = true;
-                                    break;
+                        if(te.canCheckPartialPruning){
+                            for(int pos2=0; pos2<te.numPos; pos2++){
+                                if(sample[pos2]!=-1){//pos2 assigned
+                                    if(isPairPrunedInSample(pos2,sample[pos2],pos,rc,sample)){
+                                        incompatible = true;
+                                        break;
+                                    }
                                 }
                             }
+                        }
+                        else {
+                            int[] augSamp = sample.clone();
+                            augSamp[pos] = rc;
+                            incompatible = te.isPruned(new RCTuple(augSamp));
                         }
 
                         if(incompatible)
@@ -552,12 +632,14 @@ public class TESampleSet implements Serializable {
         return ans;
     }
     
+    static Random rand = new Random(12367127);
+    
     static ArrayList<Integer> randomOrdering(int n){
         //random order of integers [0,n)
         ArrayList<Integer> a = new ArrayList<>();
         ArrayList<Integer> ans = new ArrayList<>();
         
-        Random rand = new Random();
+        //Random rand = new Random();
         
         for(int b=0; b<n; b++)
             a.add(b);
@@ -590,6 +672,49 @@ public class TESampleSet implements Serializable {
         }
         
         return false;
+    }
+    
+    
+    public int getNumSamples(){
+        return samples.size();
+    }
+
+    public ArrayList<int[]> getSamples() {
+        return samples;
+    }
+    
+    
+    public void writeOutSamples(String fileName){
+        try {
+            BufferedWriter bw = new BufferedWriter(new FileWriter(fileName));
+            for(int s=0; s<samples.size(); s++){
+                int conf[] = samples.get(s);
+                for(int c : conf)
+                    bw.write(c+" ");
+                bw.write(trueVals.get(s)+" ");
+                bw.write(curFitVals.get(s)+"\n");
+            }
+            bw.close();
+        }
+        catch(IOException e){
+            throw new RuntimeException("ERROR dumping sample set: "+e.getMessage());
+        }
+    }
+    
+    
+    void setBlankScoreMode(boolean mode){
+        if(mode && rejectInf)//If rejectInf need to evaluate scores to tell what samples to use
+            throw new RuntimeException("ERROR: Can't use blank score mode with rejectInf");
+        blankScoreMode = mode;
+    }
+    
+    //and here we fill in the "blank" scores
+    void scoreUnscoredSamples(LUTECompStatus status){
+        for(int s=trueVals.size(); s<samples.size(); s++){
+            trueVals.add(te.scoreAssignmentList(samples.get(s)));
+            if(status.isTimeToSave())
+                status.save(te);
+        }
     }
     
     

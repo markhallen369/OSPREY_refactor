@@ -12,6 +12,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 /**
  *
@@ -166,6 +167,11 @@ public class MoveableStrand implements Serializable, DOFBlock {
         copiedStrand.curAngles = curAngles.clone();
         
         return copiedStrand;
+    }
+
+    @Override
+    public List<Residue> listResidues() {
+        return res;
     }
     
 }
